@@ -23,6 +23,11 @@ def open_pdf(path: str | Path) -> fitz.Document:
 
 
 def _check_page(doc: fitz.Document, page: int) -> int:
+    # Range check MUST happen before the page - 1 conversion below: on an
+    # out-of-range page (e.g. 0 or a negative number) that conversion would
+    # otherwise hand fitz a negative index, which Python resolves by
+    # counting from the end -- silently returning the last page instead of
+    # raising.
     if not 1 <= page <= doc.page_count:
         raise ValueError(
             f"page {page} out of range; document has {doc.page_count} pages "
@@ -270,9 +275,11 @@ def extract(text: str, model: str = CHAT_MODEL, chat=None) -> Extraction:
 
     think=False disables chain-of-thought reasoning. For extraction tasks, this
     model produces six figures of thinking and returns no content when enabled,
-    so we disable it for one-shot extraction. (Compare ocr_page and run_tool_loop
-    which keep think=True because they perform judgement: does this text layer
-    need correction? Should I escalate to OCR?)
+    so we disable it for one-shot extraction. (Compare run_tool_loop, which
+    keeps think=True because it performs judgement -- does this text layer
+    need correction? Should I escalate to OCR? -- a different kind of task
+    from the transcription ocr_page does, which is why ocr_page passes no
+    think argument at all and instead relies on a non-reasoning OCR model.)
 
     chat is injectable for testing without a live model. If not provided, uses
     the real ollama.chat client.

@@ -22,6 +22,19 @@ takes ~3 min. **Have students start the run, then talk over it** — do not let
 the room sit in silence watching a spinner. The same applies to the ~14 GB model
 pull in section 1: start it, then teach section 0 while it downloads.
 
+**Hardware caveat:** every timing in this document and in the notebook (the
+~3 min above, the capstone estimate below, the per-model numbers in Section
+4) was measured on an Apple M1 Max laptop, not a Colab T4. We have never
+measured this workshop on a T4. Numbers on the day will differ — plan pacing
+around "start it and talk," not around the specific seconds.
+
+**Section 7's capstone (Hands-on 3) is the biggest timing risk in the whole
+workshop.** It runs nine `think=True` tool loops back to back, alternating
+between the chat model and the OCR model on almost every page. On the M1 Max
+that is well over ten minutes; expect longer on a shared T4. Section 7 only
+has 45 minutes total — start the capstone cell early and keep teaching over
+it, the same as the model pull in section 1, or it will eat the section.
+
 ## Section 2: the model is confidently wrong
 
 In section 2, the notebook asks the model to identify insect structures. When
@@ -51,8 +64,10 @@ argument to `think=True` and watch it call `ocr_page` and get the answer right.
 The lesson is that `think` is task-shaped: reasoning is wasted on transcription
 and indispensable for judgement.
 
-Then make the stage-3 argument deliberately: there is no regex that does this
-job. Students will reach for one — building it is the obvious idea — so tell
+Then make the "no regex version of this" argument deliberately (that is the
+notebook's own heading for it, in the section right after the two tool-loop
+cells): there is no regex that does this job. Students will reach for one —
+building it is the obvious idea — so tell
 them what happened when this workshop tried. The gate needed URL stripping,
 hand-tuned tilde and ampersand patterns, and a threshold correction, and it was
 still fitted to one scanner's damage. It failed silently on pages it had not
