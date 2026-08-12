@@ -1,4 +1,3 @@
-import pytest
 from types import SimpleNamespace
 from workshop_lib import run_tool_loop, TOOL_SCHEMAS
 
@@ -39,7 +38,11 @@ def test_tool_errors_are_fed_back_not_raised():
         _reply(tool_calls=[("ocr_page", {"page": 99})]),
         _reply(content="recovered"),
     ])
-    fake = lambda **kw: next(replies)
+    captured_messages = []
+
+    def fake(**kw):
+        captured_messages.append(kw.get("messages"))
+        return next(replies)
 
     def boom(page):
         raise ValueError("page 99 out of range")
@@ -48,6 +51,10 @@ def test_tool_errors_are_fed_back_not_raised():
                                 TOOL_SCHEMAS, {"ocr_page": boom}, chat=fake)
     assert text == "recovered"
     assert calls == [("ocr_page", {"page": 99})]
+    # Verify error was fed back to the model in the second chat call
+    second_call_messages = captured_messages[1]
+    error_message = next(m for m in second_call_messages if m.get("role") == "tool")
+    assert "page 99 out of range" in error_message["content"]
 
 
 def test_unknown_tool_is_reported_back():
@@ -55,10 +62,19 @@ def test_unknown_tool_is_reported_back():
         _reply(tool_calls=[("no_such_tool", {})]),
         _reply(content="ok"),
     ])
-    fake = lambda **kw: next(replies)
+    captured_messages = []
+
+    def fake(**kw):
+        captured_messages.append(kw.get("messages"))
+        return next(replies)
+
     text, _ = run_tool_loop([{"role": "user", "content": "go"}], [], {},
                             chat=fake)
     assert text == "ok"
+    # Verify unknown tool name was reported back to the model
+    second_call_messages = captured_messages[1]
+    error_message = next(m for m in second_call_messages if m.get("role") == "tool")
+    assert "no_such_tool" in error_message["content"]
 
 
 def test_max_turns_is_enforced():

@@ -47,27 +47,6 @@ def render_page(doc: fitz.Document, page: int, dpi: int = DEFAULT_DPI) -> str:
     return base64.b64encode(pix.tobytes("png")).decode()
 
 
-# --- Text-quality gate -----------------------------------------------------
-#
-# Old scans often DO have an embedded text layer -- it's just the output of
-# whatever OCR the scanner ran decades ago (or last year, on bad settings),
-# and it can be silently wrong. On the 1929 plate used in this workshop,
-# "Curculionidae" comes back as "Cureulionidse", "Elytra" as "Elylra",
-# "Fig. 20" as "Fi.q. 20", "265" as "2~5", and "sub-linear" as "suh-linear".
-# None of that raises a Python exception and `if not text:` sees nothing
-# wrong -- the string is non-empty, plausible-looking prose. A pipeline that
-# hands this straight to a model produces confident, fluent, wrong data at
-# scale, and nothing downstream flags it.
-#
-# This gate has to be a dumb regex, not a judgment call by the model. Show a
-# capable model this exact corrupt text and ask "does this look OK?" and it
-# will notice the damage, call it "minor OCR artifacts", and then propose a
-# plausible-sounding correction anyway -- which is exactly the failure mode
-# we're trying to avoid, just moved one step earlier. A regex that counts
-# suspicious tokens can't be talked into rationalising anything. It is also
-# cheap and instant, so it's worth running on every page before deciding
-# whether to burn time and compute on OCR.
-
 CHAT_MODEL = "qwen3.5:9b"
 OCR_MODEL = "deepseek-ocr"
 
