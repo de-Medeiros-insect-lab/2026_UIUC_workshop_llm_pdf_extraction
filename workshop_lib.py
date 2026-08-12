@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import base64
 import re
+import time
 from pathlib import Path
 
 import fitz
+import ollama
 
 DEFAULT_DPI = 100
 """100 dpi is calibrated: 72 dpi loses taxonomic terms, 150 dpi costs ~22%
@@ -191,3 +193,49 @@ def looks_corrupt(text: str, threshold: float = 0.02) -> bool:
     if _HIGH_CONFIDENCE_RE.search(_strip_urls_and_emails(text)):
         return True
     return corruption_report(text)["ratio"] > threshold
+
+
+# --- Ollama helpers --------------------------------------------------------
+
+CHAT_MODEL = "qwen3.5:9b"
+OCR_MODEL = "deepseek-ocr"
+
+OCR_PROMPT = (
+    "Transcribe ALL of the text on this page exactly as printed, verbatim. "
+    "Do not summarise, do not omit anything, do not paraphrase. "
+    "Output only the transcription."
+)
+
+
+def server_ready(timeout: float = 60.0) -> bool:
+    """Poll until the Ollama server answers, or give up."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            ollama.list()
+            return True
+        except Exception:
+            time.sleep(1.0)
+    return False
+
+
+def ocr_page(doc, page: int, dpi: int = DEFAULT_DPI) -> str:
+    """Re-read a page from its image with the dedicated OCR model.
+
+    The embedded text layer on scanned documents is often silently corrupt --
+    for example, "Curculionidae" may render as "Cureulionidse", or "Elytra"
+    as "Elylra". A vision model applied to the image can recover the correct
+    text where the text layer failed. The deepseek-ocr model is a lightweight,
+    purpose-built OCR engine that specializes in page transcription.
+
+    think is not passed: deepseek-ocr is not a reasoning model. For the chat
+    model, transcription-style work MUST pass think=False -- on defaults it
+    emits six figures of reasoning and returns no content at all.
+    """
+    image = render_page(doc, page, dpi=dpi)
+    reply = ollama.chat(
+        model=OCR_MODEL,
+        messages=[{"role": "user", "content": OCR_PROMPT, "images": [image]}],
+        options={"temperature": 0, "num_predict": 8192},
+    )
+    return reply.message.content or ""
