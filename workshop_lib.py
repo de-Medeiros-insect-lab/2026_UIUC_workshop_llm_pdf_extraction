@@ -5,9 +5,12 @@ from __future__ import annotations
 import base64
 import time
 from pathlib import Path
+from typing import List, Optional
 
 import fitz
 import ollama
+import pandas as pd
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 DEFAULT_DPI = 100
 """100 dpi is calibrated: 72 dpi loses taxonomic terms, 150 dpi costs ~22%
@@ -173,3 +176,91 @@ def run_tool_loop(messages, tools, impls, model: str = CHAT_MODEL,
                              "content": str(result)[:6000]})
 
     return (f"stopped: max_turns={max_turns} reached"), calls_made
+
+
+MAX_PLAUSIBLE_MM = 300.0  # no described weevil is 30 cm long
+
+
+class Trait(BaseModel):
+    """One measured or described character.
+
+    source_text is required on purpose: an extraction you cannot trace back to
+    the page is not evidence. It is also the field that a paraphrasing model
+    quietly destroys.
+    """
+    anatomical_part: str
+    trait: str
+    value: str
+    units: Optional[str] = None
+    source_text: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _plausible_measurement(self):
+        """Cross-field, so it must be a model validator, not a field validator.
+
+        `units` is declared after `value`, so during field validation of `value`
+        the `units` value is not yet available in info.data -- a field_validator
+        here would silently never fire.
+        """
+        if self.units == "mm":
+            try:
+                number = float(self.value)
+            except (TypeError, ValueError):
+                return self
+            if not 0 < number <= MAX_PLAUSIBLE_MM:
+                raise ValueError(
+                    f"{number} mm is not a plausible measurement "
+                    f"(0 < x <= {MAX_PLAUSIBLE_MM})"
+                )
+        return self
+
+
+class Species(BaseModel):
+    name: str
+    traits: List[Trait] = []
+
+    @field_validator("name")
+    @classmethod
+    def _binomial(cls, v):
+        if len(v.split()) < 2:
+            raise ValueError(f"{v!r} is not a binomial (need genus + species)")
+        return v
+
+
+class Extraction(BaseModel):
+    species: List[Species] = []
+
+
+EXTRACT_PROMPT = (
+    "Extract every species described in this text, with their morphological "
+    "traits. Copy the exact source sentence for each trait into source_text. "
+    "Do not invent traits that are not stated.\n\n"
+)
+
+
+def extract(text: str, model: str = CHAT_MODEL, chat=None) -> Extraction:
+    """Structured extraction, enforced by JSON-schema-constrained decoding."""
+    chat = chat or ollama.chat
+    reply = chat(
+        model=model,
+        messages=[{"role": "user", "content": EXTRACT_PROMPT + text}],
+        format=Extraction.model_json_schema(),
+        think=False,
+        options={"temperature": 0},
+    )
+    return Extraction.model_validate_json(reply.message.content)
+
+
+def to_dataframe(extraction: Extraction) -> pd.DataFrame:
+    """One row per trait, ready for analysis."""
+    rows = [
+        {"species": sp.name, "anatomical_part": tr.anatomical_part,
+         "trait": tr.trait, "value": tr.value, "units": tr.units,
+         "source_text": tr.source_text}
+        for sp in extraction.species for tr in sp.traits
+    ]
+    return pd.DataFrame(
+        rows,
+        columns=["species", "anatomical_part", "trait", "value", "units",
+                 "source_text"],
+    )
