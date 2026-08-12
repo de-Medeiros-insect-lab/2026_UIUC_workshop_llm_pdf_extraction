@@ -1,0 +1,16 @@
+name: uic_workshop_2026
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pydantic>=2.13
+  - pandas
+  - pymupdf>=1.28
+  - pillow
+  - ipykernel
+  - jupyter
+  - requests
+  - pytest
+  - pip
+  - pip:
+      - ollama>=0.6

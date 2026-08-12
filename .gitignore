@@ -1,3 +1,4 @@
 .ipynb_checkpoints/
 __pycache__/
 .DS_Store
+pdf_data_extraction.ipynb
