@@ -22,11 +22,31 @@ times; if that happens, pair up with a neighbour.
 
 ## Running locally instead
 
-    mamba env create -f environment.yml
-    mamba activate uic_workshop_2026
-    pytest tests/ -m "not ollama"
-
 Requires Ollama ≥0.32 — earlier versions cannot load these models.
+
+1. Install [Ollama](https://ollama.ai)
+2. Pull the models:
+   ```bash
+   ollama pull qwen3.5:9b
+   ollama pull deepseek-ocr
+   ```
+3. Start the Ollama server:
+   ```bash
+   ollama serve
+   ```
+4. In another terminal, set up the Python environment:
+   ```bash
+   mamba env create -f environment.yml
+   mamba activate uic_workshop_2026
+   ```
+5. Open the notebook:
+   ```bash
+   jupyter notebook workshop.ipynb
+   ```
+6. To verify your installation is sound:
+   ```bash
+   pytest tests/ -m "not ollama"
+   ```
 
 ## The 2025 version
 

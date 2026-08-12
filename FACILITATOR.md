@@ -22,12 +22,25 @@ takes ~3 min. **Have students start the run, then talk over it** — do not let
 the room sit in silence watching a spinner. The same applies to the ~14 GB model
 pull in section 1: start it, then teach section 0 while it downloads.
 
+## Section 2: the model is confidently wrong
+
+In section 2, the notebook asks the model to identify insect structures. When
+you run it, the model will make a confident claim about a taxonomic group — it
+may say something is in Staphylinoidea (rove beetles) when your workshop
+audience knows it belongs elsewhere. This is pedagogically load-bearing: the
+single most persuasive argument for grounding every answer in the source PDF is
+watching the model state something confidently and wrongly about the audience's
+own specialty. Pause and discuss the error. The model's output may differ on
+the day, so read whatever answer comes back and check it live rather than
+expecting that exact error.
+
 ## Before you begin
 
 - Ask everyone to set Runtime → Change runtime type → T4 **before** running
   anything, and to raise a hand if they cannot get a GPU.
 - Pair up anyone without a GPU immediately. Colab refuses free GPUs at busy
-  times, and CPU is far too slow for the OCR and vision sections.
+  times. There is deliberately **no CPU code path** in this notebook — a student
+  without a GPU cannot run it and must pair up.
 
 ## Section 7 is a staged failure
 
