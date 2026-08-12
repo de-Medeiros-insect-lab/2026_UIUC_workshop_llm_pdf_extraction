@@ -2,6 +2,7 @@ import pytest, fitz, pathlib
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 LEGACY = REPO / "example_pdfs" / "Marshall1929_AnnMagNatHist.pdf"
+MODERN = REPO / "example_pdfs" / "deMedeiros2013Zootaxa.pdf"
 
 
 def pytest_configure(config):
@@ -17,3 +18,9 @@ def legacy_pdf():
 @pytest.fixture(scope="session")
 def legacy_doc(legacy_pdf):
     return fitz.open(legacy_pdf)
+
+
+@pytest.fixture(scope="session")
+def modern_pdf():
+    assert MODERN.exists(), f"missing {MODERN}"
+    return MODERN

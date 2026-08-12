@@ -38,8 +38,12 @@ def test_empty_text_is_corrupt():
 
 
 def test_threshold_is_adjustable():
-    # one bad token in a long clean passage passes at a loose threshold
-    text = CLEAN + " 2~5"
+    # one soft-pattern bad token in a long clean passage passes at a loose
+    # threshold. Uses "Fi.q." rather than a tilde/ampersand token: those are
+    # high-confidence markers (see test_gate_matches_known_pages_across_both_pdfs)
+    # and are corrupt regardless of threshold by design, so they can't be
+    # used to demonstrate the threshold parameter.
+    text = CLEAN + " Fi.q."
     assert looks_corrupt(text, threshold=0.5) is False
     assert looks_corrupt(text, threshold=0.0) is True
 
@@ -47,3 +51,46 @@ def test_threshold_is_adjustable():
 def test_real_corrupt_page_is_flagged(legacy_pdf):
     doc = open_pdf(legacy_pdf)
     assert looks_corrupt(get_page_text(doc, 5)) is True
+
+
+def test_gate_matches_known_pages_across_both_pdfs(legacy_pdf, modern_pdf):
+    """Regression test over the full corpus, not just legacy page 5.
+
+    Checking a single page is exactly how a later change to the patterns
+    could silently start missing other corrupt pages, or start flagging
+    clean ones, without any test noticing -- which is what happened the
+    first time this gate was built: it passed on page 5 while quietly
+    calling three other genuinely corrupt pages of the same document
+    clean, and flagging the (clean, born-digital) publisher cover page
+    corrupt just because it contains URLs. This walks every page of both
+    example PDFs against the known-correct answer.
+    """
+    legacy = open_pdf(legacy_pdf)
+    assert legacy.page_count == 8, "expected page count changed; update this test"
+    expected_legacy = {
+        1: False,  # born-digital publisher cover page: clean despite the URLs/DOI
+        2: True,
+        3: True,
+        4: True,
+        5: True,
+        6: True,
+        7: True,  # "Cureulioni&e." -- the same mangled family name as page 5
+        8: True,
+    }
+    for page, expected in expected_legacy.items():
+        text = get_page_text(legacy, page)
+        actual = looks_corrupt(text)
+        assert actual is expected, (
+            f"legacy page {page}: expected looks_corrupt={expected}, got "
+            f"{actual}; report={corruption_report(text)}"
+        )
+
+    modern = open_pdf(modern_pdf)
+    assert modern.page_count == 7, "expected page count changed; update this test"
+    for page in range(1, modern.page_count + 1):
+        text = get_page_text(modern, page)
+        actual = looks_corrupt(text)
+        assert actual is False, (
+            f"modern page {page}: expected looks_corrupt=False (clean, "
+            f"born-digital PDF), got True; report={corruption_report(text)}"
+        )
