@@ -201,6 +201,10 @@ class Trait(BaseModel):
         `units` is declared after `value`, so during field validation of `value`
         the `units` value is not yet available in info.data -- a field_validator
         here would silently never fire.
+
+        Currently only validates millimeters. This is a workshop scope limitation:
+        real pipelines normalize units first. Centimeters, inches, and other units
+        bypass this check entirely.
         """
         if self.units == "mm":
             try:
@@ -216,18 +220,37 @@ class Trait(BaseModel):
 
 
 class Species(BaseModel):
+    """A species with its measured and described traits.
+
+    The name field requires a binomial (genus + species). Failing on a bare genus
+    is intentional: when a genus-only or family-level identification appears, it
+    usually means the model failed to extract the actual binomial name. Accepting
+    and quietly recording the incomplete name would hide that failure. Loud failure
+    makes the problem visible.
+    """
     name: str
     traits: List[Trait] = []
 
     @field_validator("name")
     @classmethod
     def _binomial(cls, v):
+        """Validate that name contains at least genus and species.
+
+        Rejects names with fewer than two words (genus-only, family names, etc).
+        """
         if len(v.split()) < 2:
             raise ValueError(f"{v!r} is not a binomial (need genus + species)")
         return v
 
 
 class Extraction(BaseModel):
+    """The output of structured extraction: all species and their traits found
+    in a text.
+
+    Enforced by pydantic model validation: each Species must have a binomial
+    name, each Trait must have source_text, and any measurement in millimeters
+    must be plausible (0 < x <= 300).
+    """
     species: List[Species] = []
 
 
@@ -239,7 +262,21 @@ EXTRACT_PROMPT = (
 
 
 def extract(text: str, model: str = CHAT_MODEL, chat=None) -> Extraction:
-    """Structured extraction, enforced by JSON-schema-constrained decoding."""
+    """Structured extraction, enforced by JSON-schema-constrained decoding.
+
+    The format parameter enforces the response to match Extraction.model_json_schema(),
+    making this the whole point of the section: replacing the 2025 approach of
+    asking nicely for JSON and repairing it afterwards.
+
+    think=False disables chain-of-thought reasoning. For extraction tasks, this
+    model produces six figures of thinking and returns no content when enabled,
+    so we disable it for one-shot extraction. (Compare ocr_page and run_tool_loop
+    which keep think=True because they perform judgement: does this text layer
+    need correction? Should I escalate to OCR?)
+
+    chat is injectable for testing without a live model. If not provided, uses
+    the real ollama.chat client.
+    """
     chat = chat or ollama.chat
     reply = chat(
         model=model,
@@ -252,7 +289,15 @@ def extract(text: str, model: str = CHAT_MODEL, chat=None) -> Extraction:
 
 
 def to_dataframe(extraction: Extraction) -> pd.DataFrame:
-    """One row per trait, ready for analysis."""
+    """Flatten an Extraction to one row per trait, ready for analysis.
+
+    Each row represents a single trait measurement or description, with columns:
+    species, anatomical_part, trait, value, units, source_text.
+
+    An empty Extraction (no species, or species with no traits) returns a
+    DataFrame with zero rows but all six named columns, preserving schema
+    consistency downstream.
+    """
     rows = [
         {"species": sp.name, "anatomical_part": tr.anatomical_part,
          "trait": tr.trait, "value": tr.value, "units": tr.units,

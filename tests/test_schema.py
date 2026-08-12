@@ -1,6 +1,9 @@
+import json
+from types import SimpleNamespace
+
 import pytest
 from pydantic import ValidationError
-from workshop_lib import Trait, Species, Extraction, to_dataframe
+from workshop_lib import Trait, Species, Extraction, to_dataframe, extract
 
 
 def test_trait_requires_the_source_sentence():
@@ -55,3 +58,71 @@ def test_to_dataframe_empty_extraction():
     assert len(df) == 0
     assert list(df.columns) == ["species", "anatomical_part", "trait", "value",
                                  "units", "source_text"]
+
+
+def _fake_reply(json_content: str):
+    """Helper to build a fake chat reply with JSON content."""
+    return SimpleNamespace(
+        message=SimpleNamespace(content=json_content, tool_calls=None)
+    )
+
+
+def test_extract_passes_think_false():
+    """Extraction is one-shot; think=False disables chain-of-thought."""
+    seen = {}
+
+    def fake(**kw):
+        seen.update(kw)
+        # Return valid Extraction JSON
+        data = Extraction(species=[]).model_dump_json()
+        return _fake_reply(data)
+
+    extract("some text", chat=fake)
+    assert seen["think"] is False
+
+
+def test_extract_passes_format_schema():
+    """Schema-constrained decoding enforces structured output."""
+    seen = {}
+
+    def fake(**kw):
+        seen.update(kw)
+        data = Extraction(species=[]).model_dump_json()
+        return _fake_reply(data)
+
+    extract("some text", chat=fake)
+    assert "format" in seen
+    assert seen["format"] == Extraction.model_json_schema()
+
+
+def test_extract_returns_validated_extraction():
+    """extract() parses and validates the chat model's JSON response."""
+    def fake(**kw):
+        # Return valid JSON with one species and one trait
+        data = Extraction(species=[
+            Species(name="Huarucus cacti", traits=[
+                Trait(anatomical_part="elytra", trait="length", value="2.5",
+                      units="mm", source_text="Elytra 2.5 mm long"),
+            ]),
+        ]).model_dump_json()
+        return _fake_reply(data)
+
+    result = extract("some text", chat=fake)
+    assert isinstance(result, Extraction)
+    assert len(result.species) == 1
+    assert result.species[0].name == "Huarucus cacti"
+    assert len(result.species[0].traits) == 1
+    assert result.species[0].traits[0].anatomical_part == "elytra"
+
+
+def test_extract_uses_injected_chat():
+    """Injected chat callable is actually used; real ollama never touched."""
+    chat_was_called = []
+
+    def fake(**kw):
+        chat_was_called.append(True)
+        data = Extraction(species=[]).model_dump_json()
+        return _fake_reply(data)
+
+    extract("some text", chat=fake)
+    assert len(chat_was_called) == 1
