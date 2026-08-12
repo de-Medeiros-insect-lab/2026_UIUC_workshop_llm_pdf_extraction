@@ -110,3 +110,87 @@ def ocr_page(doc, page: int, dpi: int = DEFAULT_DPI) -> str:
         options={"temperature": 0, "num_predict": 8192},
     )
     return reply.message.content or ""
+
+
+TOOL_SCHEMAS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_page_text",
+            "description": (
+                "Return the PDF's embedded text layer for a page. Free and "
+                "instant, but on scanned documents it may be poor-quality OCR "
+                "with garbled words."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "page": {"type": "integer",
+                             "description": "1-based page number"}
+                },
+                "required": ["page"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "ocr_page",
+            "description": (
+                "Re-read a page from its image with a dedicated OCR model. "
+                "Slower but far more accurate on scans."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "page": {"type": "integer",
+                             "description": "1-based page number"}
+                },
+                "required": ["page"],
+            },
+        },
+    },
+]
+
+
+def run_tool_loop(messages, tools, impls, model: str = CHAT_MODEL,
+                  max_turns: int = 6, think: bool = True, chat=None):
+    """Drive a multi-turn tool conversation.
+
+    Returns (final_text, calls_made). `chat` is injectable for testing.
+
+    think defaults to True and should stay True. Deciding whether a page's text
+    is trustworthy is judgement work: with think=False this model reads the
+    corrupt text, talks itself out of the problem, and answers anyway. With
+    reasoning on it re-reads the page via ocr_page and gets it right.
+    """
+    chat = chat or ollama.chat
+    messages = list(messages)
+    calls_made: list[tuple[str, dict]] = []
+
+    for _ in range(max_turns):
+        reply = chat(model=model, messages=messages, tools=tools,
+                     think=think, options={"temperature": 0})
+        msg = reply.message
+        messages.append({"role": "assistant", "content": msg.content or "",
+                         "tool_calls": msg.tool_calls or []})
+
+        if not msg.tool_calls:
+            return (msg.content or ""), calls_made
+
+        for call in msg.tool_calls:
+            name = call.function.name
+            args = dict(call.function.arguments)
+            calls_made.append((name, args))
+            impl = impls.get(name)
+            if impl is None:
+                result = f"ERROR: no such tool {name!r}"
+            else:
+                try:
+                    result = impl(**args)
+                except Exception as exc:            # feed errors back
+                    result = f"ERROR: {exc}"
+            messages.append({"role": "tool", "name": name,
+                             "content": str(result)[:6000]})
+
+    return (f"stopped: max_turns={max_turns} reached"), calls_made
