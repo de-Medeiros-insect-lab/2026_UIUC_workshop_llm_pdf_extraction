@@ -21,9 +21,17 @@ pandas, pytest. Models: `qwen3.5:9b`, `deepseek-ocr`.
   load on 0.13.2 — the pull fails with a bare "download the latest version".
 - **Render pages at 100 dpi.** 72 dpi loses 4 of 20 taxonomic terms; 150 dpi
   costs ~22% more time for one extra term.
-- **Always pass `think=False` for transcription and OCR calls.** On default
-  settings `qwen3.5:9b` produced 123,055 characters of thinking, hit
-  `done_reason='length'`, and returned zero content.
+- **`think` is task-shaped. Never set it globally.**
+  - `think=False` for transcription and one-shot extraction. On defaults
+    `qwen3.5:9b` produced 123,055 characters of thinking, hit
+    `done_reason='length'`, and returned zero content.
+  - `think=True` for the agentic loop. With reasoning off the model never
+    escalates to `ocr_page` (reproduced across four prompt formulations); with
+    it on, it routes correctly in ~52 s. `run_tool_loop` therefore defaults to
+    `think=True`.
+- **Keep agentic system prompts short.** A strict "count the garbled words"
+  prompt produced 14,358 characters of thinking and took 186 s versus 52 s for a
+  plain one, for the same answer.
 - **All page indices refer to the prepared 8-page
   `example_pdfs/Marshall1929_AnnMagNatHist.pdf`**, not the 9-page original.
   Printed p. 264 is PDF page 2. Page numbers in the public API are **1-based**.
@@ -623,6 +631,22 @@ def test_tool_schemas_describe_both_tools():
     ocr = next(t for t in TOOL_SCHEMAS
                if t["function"]["name"] == "ocr_page")
     assert "page" in ocr["function"]["parameters"]["properties"]
+
+
+def test_think_defaults_to_true_and_is_passed_through():
+    """Reasoning is what makes the loop escalate to OCR; guard the default."""
+    seen = {}
+
+    def fake(**kw):
+        seen.update(kw)
+        return _reply(content="ok")
+
+    run_tool_loop([{"role": "user", "content": "hi"}], [], {}, chat=fake)
+    assert seen["think"] is True
+
+    run_tool_loop([{"role": "user", "content": "hi"}], [], {}, think=False,
+                  chat=fake)
+    assert seen["think"] is False
 ```
 
 - [ ] **Step 2: Run it to confirm it fails**
@@ -679,14 +703,15 @@ TOOL_SCHEMAS = [
 
 
 def run_tool_loop(messages, tools, impls, model: str = CHAT_MODEL,
-                  max_turns: int = 6, chat=None):
+                  max_turns: int = 6, think: bool = True, chat=None):
     """Drive a multi-turn tool conversation.
 
     Returns (final_text, calls_made). `chat` is injectable for testing.
 
-    Note: the model decides *which* tool to call, but do not rely on it to
-    judge whether text is good enough -- it will not escalate to OCR on its
-    own. Gate that in code with looks_corrupt().
+    think defaults to True and should stay True. Deciding whether a page's text
+    is trustworthy is judgement work: with think=False this model reads the
+    corrupt text, talks itself out of the problem, and answers anyway. With
+    reasoning on it re-reads the page via ocr_page and gets it right.
     """
     chat = chat or ollama.chat
     messages = list(messages)
@@ -694,7 +719,7 @@ def run_tool_loop(messages, tools, impls, model: str = CHAT_MODEL,
 
     for _ in range(max_turns):
         reply = chat(model=model, messages=messages, tools=tools,
-                     think=False, options={"temperature": 0})
+                     think=think, options={"temperature": 0})
         msg = reply.message
         messages.append({"role": "assistant", "content": msg.content or "",
                          "tool_calls": msg.tool_calls or []})
@@ -1112,9 +1137,16 @@ print("--- reasoning ---");  print(reply.message.thinking)
 print("--- answer ---");     print(reply.message.content)
 ```
 
-Add a markdown warning immediately after, stating that `think=True` on a
-transcription task made this model emit 123,055 characters of reasoning and
-return no answer at all, and that transcription calls must pass `think=False`.
+Add a markdown warning immediately after: `think=True` on a *transcription* task
+made this model emit 123,055 characters of reasoning, hit its token limit, and
+return no answer at all. Transcription is recall — there is nothing to reason
+about — so those calls pass `think=False`.
+
+Do **not** state this as a general rule. Flag forward instead: in section 7 the
+same setting reverses, because choosing tools and judging whether text is
+trustworthy is reasoning work and the agent does not function without it. The
+lesson is to match `think` to the kind of task, and section 7 supplies the other
+half.
 
 **Hands-on 1** (end of section 2). Students write their own system prompt and
 see how strongly it steers a 9B model — the role-play point from Shanahan et al.
@@ -1251,9 +1283,14 @@ except ValidationError as e:
     print("Rejected, as it should be:\n", e)
 ```
 
-- [ ] **Step 3: Add section 7, staged as the measured failure then the fix**
+- [ ] **Step 3: Add section 7 — the third beat of the ramp**
 
-Stage 1 — give the model both tools and let it fail, live:
+Open with markdown recalling the ramp: §3 read a modern PDF where the text layer
+worked; §4 called `ocr_page` by hand on the 1929 scan. Now the model routes per
+page itself — delegation is safe here only because the previous two sections
+taught what to check.
+
+Stage 1 — reasoning off, so students see the failure that motivates the setting:
 
 ```python
 from workshop_lib import run_tool_loop, TOOL_SCHEMAS, ocr_page
@@ -1262,27 +1299,42 @@ impls = {
     "get_page_text": lambda page: get_page_text(legacy, page),
     "ocr_page":      lambda page: ocr_page(legacy, page),
 }
-system = ("You extract data from scanned historical taxonomic literature. "
-          "The embedded text layer is old OCR and is frequently corrupt. "
-          "Never guess or silently repair a garbled word: if the text looks "
-          "corrupt, call ocr_page and use its output instead.")
+system = ("You are a taxonomic data extraction assistant reading scanned "
+          "historical literature. The embedded text layer of a scan is often "
+          "corrupt: watch for garbled words and impossible spellings of "
+          "taxonomic names. If the text looks corrupt, re-read the page with "
+          "ocr_page before trusting it.")
+question = [{"role": "system", "content": system},
+            {"role": "user", "content":
+             "On page 5, what is the family name printed in the running header? "
+             "Report it exactly."}]
 
-answer, calls = run_tool_loop(
-    [{"role": "system", "content": system},
-     {"role": "user", "content":
-      "On page 5, what is the family name in the running header?"}],
-    TOOL_SCHEMAS, impls)
-
-print("tools the model chose:", calls)
+answer, calls = run_tool_loop(question, TOOL_SCHEMAS, impls, think=False)
+print("tools chosen:", calls)
 print(answer)
 ```
 
-Markdown after it: the model calls `get_page_text`, *notices* the corruption,
-rationalises it as a minor artifact, and answers from the bad text anyway —
-often inventing a spelling. This was reproduced across four different system
-prompts. Prompt engineering does not fix it.
+Markdown: it calls `get_page_text`, *notices* the corruption, calls it a minor
+artifact, and answers from the bad text anyway — usually inventing a spelling.
+Reproduced across four different system prompts. Prompting does not fix it.
 
-Stage 2 — put the decision in code:
+Stage 2 — the same call, reasoning on. Change one argument:
+
+```python
+answer, calls = run_tool_loop(question, TOOL_SCHEMAS, impls, think=True)
+print("tools chosen:", calls)   # expect get_page_text THEN ocr_page
+print(answer)                   # expect: Curculionidae
+```
+
+Markdown: this is the payoff for section 5. Transcription is recall, so
+reasoning there wastes 47 minutes producing nothing. Tool choice and judging
+whether your input is trustworthy are reasoning, and the loop simply does not
+work without it. Knowing which kind of task you have is the skill. Note also
+that a *shorter* system prompt works better here — an elaborate
+"count-the-garbled-words" version took 186 s against 52 s for the plain one and
+reached the same answer.
+
+Stage 3 — the deterministic alternative, and the trade-off:
 
 ```python
 from workshop_lib import looks_corrupt, page_text_trusted
@@ -1290,17 +1342,19 @@ from workshop_lib import looks_corrupt, page_text_trusted
 print("gate says corrupt?", looks_corrupt(get_page_text(legacy, 5)))
 print(corruption_report(get_page_text(legacy, 5))["suspect_words"][:8])
 
-text, source = page_text_trusted(legacy, 5)
+text, source = page_text_trusted(legacy, 5)   # instant, no model involved
 print("source used:", source)
-print(" ".join(text.split())[:160])
 ```
 
-Markdown: the lesson is *where the decision lives*, not that agents are magic.
-The model is good at choosing among tools and bad at judging whether its input
-is trustworthy. Keep that judgement deterministic.
+Markdown: both routes reach the same page. The gate is instant and free but only
+catches what you wrote patterns for; the agent costs ~52 s per page and
+generalises to decisions you did not anticipate. At 4,500 papers you want the
+gate. While exploring an unfamiliar corpus you want the agent. Choosing where a
+decision lives is the engineering judgement worth taking home.
 
-Hands-on 3: students tune `looks_corrupt`'s threshold and patterns against
-pages 2–8 and report which pages route to OCR.
+**Hands-on 3 (capstone):** run both routes over pages 2–8, compare which pages
+each sends to OCR, and tune `looks_corrupt`'s threshold and patterns until they
+agree. Where they disagree, look at the page and decide which was right.
 
 - [ ] **Step 4: Add section 8 (cloud) and section 9 (where to go)**
 
@@ -1321,8 +1375,11 @@ print("tools the cloud model chose:", calls)
 print(answer)
 ```
 
-Markdown must pose the open question honestly: the 9B model never escalated to
-OCR. Does the larger one? Run it and see.
+Markdown poses the open question honestly: the 9B model needed `think=True` to
+escalate to OCR at all. Does a much larger model still need it, or can it route
+correctly with reasoning off? Run the cell both ways and see — this is a real
+unanswered question, not a rhetorical one, and it is exactly the kind of thing
+worth measuring on your own documents rather than taking on trust.
 
 Section 9's portability demo. Same server, same model, a different client — so
 students see that this code is not locked to Ollama:

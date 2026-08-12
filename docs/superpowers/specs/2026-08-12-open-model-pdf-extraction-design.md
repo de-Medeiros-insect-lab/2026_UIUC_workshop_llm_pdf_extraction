@@ -100,11 +100,13 @@ Two teaching artifacts fall out of this table:
   DeepSeek-OCR nothing at all. Note the sweep timings above include some load
   overhead (models alternated); the warm cost model below is the fair
   head-to-head.
-- **`think=False` for transcription.** Not an optimization — a requirement.
-  Qwen on default settings spent 47 minutes emitting 123,055 characters of
-  thinking, hit `done_reason='length'`, and returned *zero* content. Given
-  nothing to reason about, reasoning mode ruminates. Memorable lesson about
-  applying a feature to the wrong task.
+- **`think` is task-shaped, not a global setting.** `think=False` for
+  transcription: on defaults Qwen spent 47 minutes emitting 123,055 characters
+  of thinking, hit `done_reason='length'`, and returned *zero* content — given
+  nothing to reason about, reasoning ruminates. But `think=True` is *required*
+  for the agentic loop in Section 7, which does not function without it.
+  Transcription is recall; tool choice is judgement. Match the setting to which
+  one you have.
 
 **Cost model** (warm, 100 dpi, M1 Max — validate on a T4 before the day):
 
@@ -253,37 +255,50 @@ to Innovation" arc.
   types, enums vs free text, encoding "not applicable", and Pydantic
   validators that catch semantically-wrong-but-syntactically-valid output (a
   5000 mm beetle). More durable knowledge than prompt tricks.
-- **Section 7** — the agentic loop, taught as *where to put the decision*.
+- **Section 7** — the agentic loop, reached as the third beat of a difficulty
+  ramp that spans Sections 3, 4, and 7:
 
-  **Measured before planning:** `qwen3.5:9b` completes a multi-turn tool loop
-  correctly, but **will not escalate to `ocr_page` on its own judgement**.
-  Tested across four system-prompt formulations (naive; forbidding silent
-  repair; an explicit count-the-garbled-words procedure; and a task demanding a
-  verifiable real family name) it always called `get_page_text`, noticed the
-  corruption, rationalised it as "minor OCR artifacts", and answered anyway —
-  hallucinating `Cureulonidae` / `Curelonidae` / `Curculionidae` in one reply
-  and asserting the wrong one was valid.
+  1. **Modern PDF (§3).** The text layer works. No OCR needed. Establishes the
+     easy case and what "good" looks like.
+  2. **Legacy PDF, OCR by hand (§4).** You call `ocr_page` yourself and watch it
+     repair the corrupt text layer. Teaches the mechanism with the decision
+     still in your hands.
+  3. **Let the agent decide (§7).** Give it both tools and let it route per
+     page. Now the decision is delegated — and it can only be delegated because
+     of what beats 1 and 2 taught you to check.
 
-  So the section teaches the loop mechanics *and* the limit:
+  Each beat motivates the next, and nothing is delegated before it is
+  understood.
 
-  1. Give the model both tools with a reasonable prompt. Run it. It fails, live.
-  2. Attempt to fix by prompting. Show it still fails. Prompt engineering has
-     limits, and this is a cheap, honest place to learn that.
-  3. Diagnose: self-assessment of data quality is the wrong job for a 9B model,
-     which is trained to be helpful and will therefore produce *an* answer.
-  4. Move the decision into code — a deterministic `looks_corrupt()` gate that
-     routes to `ocr_page`. The model still uses the tools; the *gate* is code.
-  5. Re-run; extraction is now correct.
+  **Measured, and it hinges on one parameter.** `qwen3.5:9b` escalates correctly
+  **only with `think=True`**:
 
-  This is a better lesson than "the agent figures it out": it teaches what to
-  delegate to a model and what to keep deterministic, which is the judgement
-  that actually transfers to their own pipelines. Hands-on: students implement
-  and tune the gate.
+  | setting | behaviour |
+  | --- | --- |
+  | `think=False` | calls `get_page_text`, notices the corruption, rationalises it as "minor OCR artifacts", answers from the bad text, invents a spelling. Reproduced across four prompt formulations |
+  | `think=True` | `get_page_text` → reads `Cureulionidse` → `ocr_page` → answers `Curculionidae` correctly, in ~52 s |
 
-  **Open question, deliberately left open for Section 8:** does a larger model
-  escalate? Untested — `gpt-oss:20b` would not load on Ollama 0.32.9 (stale
-  model file). Verify against a cloud model before the workshop; if it does
-  escalate, that is a strong payoff for Section 8 and should be shown.
+  This makes Section 7 the payoff for the thinking material in Section 5, and it
+  refines that lesson into something task-shaped rather than a blanket rule:
+
+  - **`think=False` for transcription.** Nothing to reason about; the model
+    ruminates for 47 minutes and returns no content.
+  - **`think=True` for judgement.** Choosing tools and assessing whether input
+    is trustworthy is precisely reasoning work, and the loop does not function
+    without it.
+
+  Knowing *which* kind of task you have is the transferable skill.
+
+  **Also keep the deterministic gate** (`looks_corrupt()`), not as a
+  replacement but as the cost comparison. The gate is instant and free; the
+  reasoning agent takes ~52 s per page but generalises to decisions you did not
+  anticipate. At 4,500 papers you want the gate; while exploring you want the
+  agent. Hands-on: students run both on pages 2–8 and compare which pages each
+  routes to OCR.
+
+  **Still worth checking before the day:** whether a larger model escalates with
+  `think=False`. Untested — `gpt-oss:20b` would not load on Ollama 0.32.9 (stale
+  model file). If a cloud model manages it, that is a good Section 8 aside.
 - **Section 8** — `qwen3.5:9b` → `qwen3.5:cloud`, identical code. Free tier,
   no credit card, self-issued key in Colab Secrets. This preserves the 2025
   security lesson ("never hardcode keys") without the billing anxiety, and
