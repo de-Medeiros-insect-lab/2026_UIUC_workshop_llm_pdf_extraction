@@ -6,7 +6,7 @@
 modern and 1929 taxonomic PDFs using open-weight models served by Ollama.
 
 **Architecture:** A tested Python module (`workshop_lib.py`) holds the plumbing —
-PDF access, Ollama calls, the OCR gate, the tool loop, the extraction schema. The
+PDF access, Ollama calls, OCR, the tool loop, the extraction schema. The
 notebook imports it and displays the source of teaching-critical functions with
 `inspect.getsource`, so students read and edit real code without the notebook
 becoming an untestable wall of definitions. Everything runs on one Ollama backend
@@ -35,8 +35,14 @@ pandas, pytest. Models: `qwen3.5:9b`, `deepseek-ocr`.
 - **All page indices refer to the prepared 8-page
   `example_pdfs/Marshall1929_AnnMagNatHist.pdf`**, not the 9-page original.
   Printed p. 264 is PDF page 2. Page numbers in the public API are **1-based**.
-- **Never claim the model escalates to OCR by itself.** It does not; this was
-  measured. The gate is deterministic code.
+- **No deterministic text-quality heuristics.** An earlier revision shipped a
+  `looks_corrupt()` regex gate; it was removed. Making it pass on the two
+  example PDFs required stripping URLs, hand-tuning tilde and ampersand
+  patterns, and correcting a ratio threshold that misfired in both directions.
+  The result was overfit to one scanner's damage and would silently
+  misclassify a student's own documents while presenting itself as a general
+  technique. Deciding whether text is trustworthy is either known a priori (you
+  know which of your PDFs are scans) or delegated to a reasoning model.
 - **Sanitization wording stays generic** in commit messages and committed docs.
 - Repo: `de-Medeiros-insect-lab/2026_UIUC_workshop_llm_pdf_extraction`, branch
   `main`.
@@ -49,7 +55,7 @@ pandas, pytest. Models: `qwen3.5:9b`, `deepseek-ocr`.
 | --- | --- |
 | `workshop_lib.py` | All tested plumbing imported by the notebook |
 | `tests/test_pdf.py` | Page text + rendering |
-| `tests/test_gate.py` | The corruption gate |
+| `tests/test_ollama.py` | Server check + OCR, against a live model |
 | `tests/test_loop.py` | Tool-loop driver, with a fake model |
 | `tests/test_schema.py` | Extraction schema + validators |
 | `tests/conftest.py` | Shared fixtures; `ollama` marker |
@@ -253,8 +259,12 @@ def _check_page(doc: fitz.Document, page: int) -> int:
 def get_page_text(doc: fitz.Document, page: int) -> str:
     """The PDF's embedded text layer for a page.
 
-    Free and instant. On scanned documents this is the output of whatever OCR
-    the scanner ran, which may be silently corrupt -- see looks_corrupt().
+    Free and instant, and correct for born-digital PDFs.
+
+    On a scanned document this returns whatever OCR the scanner ran, which may
+    be silently corrupt: the 1929 example renders "Curculionidae" as
+    "Cureulionidse". It does not come back empty, so there is nothing to check
+    for -- compare it against ocr_page() to see the damage.
     """
     return doc[_check_page(doc, page)].get_text()
 
@@ -277,148 +287,6 @@ Expected: 6 passed.
 ```bash
 git add workshop_lib.py tests/test_pdf.py
 git commit -m "Add PDF page access and rendering helpers"
-```
-
----
-
-### Task 3: The corruption gate
-
-This is the heart of Section 7 and the one piece the model cannot be trusted to
-do. Keep it deterministic, cheap, and explainable.
-
-**Files:**
-- Modify: `workshop_lib.py`
-- Create: `tests/test_gate.py`
-
-**Interfaces:**
-- Consumes: nothing
-- Produces:
-  - `looks_corrupt(text: str, threshold: float = 0.02) -> bool`
-  - `corruption_report(text: str) -> dict` with keys `ratio`, `suspect_words`,
-    `n_words`
-
-- [ ] **Step 1: Write the failing test**
-
-`tests/test_gate.py`:
-
-```python
-from workshop_lib import looks_corrupt, corruption_report, open_pdf, get_page_text
-
-CLEAN = (
-    "Legs approximately equal in length; femora slender, sub-linear and not "
-    "toothed, the hind pair not exceeding the apex of the elytra; tibiae "
-    "compressed, curved at the base, sub-carinate dorsally."
-)
-DIRTY = (
-    "new South American Cureulionidse. 267 Legs approximately equal in length; "
-    "femora slender, suh-linear and not toothed; Elylra oblong; Fi.q. 20; 2~5"
-)
-
-
-def test_clean_text_passes():
-    assert looks_corrupt(CLEAN) is False
-
-
-def test_dirty_text_is_flagged():
-    assert looks_corrupt(DIRTY) is True
-
-
-def test_report_names_the_suspects():
-    suspects = " ".join(corruption_report(DIRTY)["suspect_words"])
-    assert "2~5" in suspects
-    assert "Fi.q." in suspects or "Fi.q" in suspects
-
-
-def test_report_counts_words():
-    r = corruption_report(CLEAN)
-    assert r["n_words"] > 20
-    assert r["ratio"] == 0.0
-
-
-def test_empty_text_is_corrupt():
-    # a scan with no text layer at all must route to OCR
-    assert looks_corrupt("") is True
-    assert looks_corrupt("   \n  ") is True
-
-
-def test_threshold_is_adjustable():
-    # one bad token in a long clean passage passes at a loose threshold
-    text = CLEAN + " 2~5"
-    assert looks_corrupt(text, threshold=0.5) is False
-    assert looks_corrupt(text, threshold=0.0) is True
-
-
-def test_real_corrupt_page_is_flagged(legacy_pdf):
-    doc = open_pdf(legacy_pdf)
-    assert looks_corrupt(get_page_text(doc, 5)) is True
-```
-
-- [ ] **Step 2: Run it to confirm it fails**
-
-```bash
-/Users/bruno/miniforge3/envs/uic_workshop_2026/bin/python -m pytest tests/test_gate.py -v
-```
-Expected: FAIL — `ImportError: cannot import name 'looks_corrupt'`.
-
-- [ ] **Step 3: Write the implementation**
-
-Append to `workshop_lib.py`:
-
-```python
-import re
-
-# Letter patterns that essentially never occur in English or in Latin
-# taxonomic names, but are common OCR damage.
-_SUSPECT_PATTERNS = [
-    r"[a-zA-Z]~",        # 2~5, Curculionid~e
-    r"~[a-zA-Z]",
-    r"\d~",
-    r"[a-z]\.[a-z]",     # Fi.q.
-    r"[a-zA-Z][&][a-zA-Z]",   # Cureulioni&e
-    r"[a-zA-Z]{2}[0-9]{1,2}[a-zA-Z]{2}",  # digits embedded in words
-    r"\b[bcdfghjklmnpqrstvwxz]{4,}\b",     # 4+ consonants, no vowel
-]
-_SUSPECT_RE = re.compile("|".join(_SUSPECT_PATTERNS))
-
-
-def corruption_report(text: str) -> dict:
-    """Describe how damaged a block of text looks.
-
-    Deterministic on purpose. The model cannot be relied on to judge this:
-    given corrupt text it will rationalise the damage and invent a correction.
-    """
-    words = text.split()
-    suspects = [w for w in words if _SUSPECT_RE.search(w)]
-    ratio = (len(suspects) / len(words)) if words else 1.0
-    return {"ratio": ratio, "suspect_words": suspects, "n_words": len(words)}
-
-
-def looks_corrupt(text: str, threshold: float = 0.02) -> bool:
-    """True when a page's text layer should not be trusted.
-
-    Empty or whitespace-only text counts as corrupt: a scan with no text layer
-    must route to OCR just like a badly-OCR'd one.
-    """
-    if not text.strip():
-        return True
-    return corruption_report(text)["ratio"] > threshold
-```
-
-- [ ] **Step 4: Run the tests**
-
-```bash
-/Users/bruno/miniforge3/envs/uic_workshop_2026/bin/python -m pytest tests/test_gate.py -v
-```
-Expected: 7 passed. If `test_real_corrupt_page_is_flagged` fails, print
-`corruption_report(get_page_text(doc, 5))` and widen `_SUSPECT_PATTERNS` until
-the real page trips the gate — do not lower the threshold below 0.02, which
-would flag clean pages.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add workshop_lib.py tests/test_gate.py
-git commit -m "Add deterministic text-quality gate"
 ```
 
 ---
@@ -959,88 +827,6 @@ git commit -m "Add extraction schema with plausibility validators"
 
 ---
 
-### Task 7: End-to-end pipeline check
-
-Proves the gate actually changes the outcome — the claim Section 7 rests on.
-
-**Files:**
-- Modify: `workshop_lib.py`
-- Create: `tests/test_pipeline.py`
-
-**Interfaces:**
-- Consumes: everything above
-- Produces: `page_text_trusted(doc, page, dpi=DEFAULT_DPI) -> tuple[str, str]`
-  returning `(text, source)` where `source` is `"text_layer"` or `"ocr"`
-
-- [ ] **Step 1: Write the failing test**
-
-`tests/test_pipeline.py`:
-
-```python
-import pytest
-from workshop_lib import page_text_trusted, open_pdf
-
-
-@pytest.mark.ollama
-def test_corrupt_page_is_routed_to_ocr_and_repaired(legacy_pdf):
-    doc = open_pdf(legacy_pdf)
-    text, source = page_text_trusted(doc, 5)
-    assert source == "ocr"
-    assert "Curculionid" in text
-    assert "Cureulionidse" not in text
-
-
-@pytest.mark.ollama
-def test_clean_page_uses_the_free_path(legacy_pdf):
-    """Page 1 is the born-digital publisher cover: no OCR needed."""
-    doc = open_pdf(legacy_pdf)
-    _, source = page_text_trusted(doc, 1)
-    assert source == "text_layer"
-```
-
-- [ ] **Step 2: Run it to confirm it fails**
-
-```bash
-/Users/bruno/miniforge3/envs/uic_workshop_2026/bin/python -m pytest tests/test_pipeline.py -v -m ""
-```
-Expected: FAIL — `ImportError: cannot import name 'page_text_trusted'`.
-
-- [ ] **Step 3: Write the implementation**
-
-Append to `workshop_lib.py`:
-
-```python
-def page_text_trusted(doc, page: int, dpi: int = DEFAULT_DPI):
-    """Return text you can trust, plus where it came from.
-
-    The decision is deterministic and lives here, in code, rather than in the
-    model's judgement -- measured behaviour is that the model notices the
-    corruption, talks itself out of it, and invents a correction.
-    """
-    text = get_page_text(doc, page)
-    if looks_corrupt(text):
-        return ocr_page(doc, page, dpi=dpi), "ocr"
-    return text, "text_layer"
-```
-
-- [ ] **Step 4: Run the tests**
-
-```bash
-/Users/bruno/miniforge3/envs/uic_workshop_2026/bin/python -m pytest tests/test_pipeline.py -v -m ""
-```
-Expected: 2 passed. If page 1 trips the gate, inspect
-`corruption_report(get_page_text(doc, 1))` — the publisher cover contains URLs,
-which may need excluding from the suspect patterns.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add workshop_lib.py tests/test_pipeline.py
-git commit -m "Add trusted-text routing and end-to-end pipeline test"
-```
-
----
-
 ### Task 8: Notebook sections 0–5
 
 **Files:**
@@ -1218,13 +1004,13 @@ git commit -m "Add notebook sections 0-5"
 - Modify: `workshop.ipynb`
 
 **Interfaces:**
-- Consumes: `extract`, `to_dataframe`, `run_tool_loop`, `page_text_trusted`,
-  `looks_corrupt`, `corruption_report`
+- Consumes: `extract`, `to_dataframe`, `run_tool_loop`, `ocr_page`,
+  `get_page_text`
 
 - [ ] **Step 1: Add section 4 (OCR) with the side-by-side comparison**
 
 ```python
-from workshop_lib import ocr_page, corruption_report
+from workshop_lib import ocr_page
 
 dirty = get_page_text(legacy, 5)
 clean = ocr_page(legacy, 5)
@@ -1336,27 +1122,33 @@ that a *shorter* system prompt works better here — an elaborate
 "count-the-garbled-words" version took 186 s against 52 s for the plain one and
 reached the same answer.
 
-Stage 3 — the deterministic alternative, and the trade-off:
+Stage 3 — why there is no regex version of this.
 
-```python
-from workshop_lib import looks_corrupt, page_text_trusted
+Markdown must make this argument explicitly, because it is the section's real
+lesson and students will otherwise reach for the obvious shortcut. A first
+attempt at building this workshop *did* ship a deterministic `looks_corrupt()`
+gate. Making it work on just these two PDFs required stripping URLs (a clean
+publisher cover full of DOIs scored as badly damaged), hand-tuning patterns for
+tildes and ampersands, and fixing a ratio threshold that was wrong in both
+directions — it passed four genuinely corrupt pages, including one containing
+`Cureulioni&e.`, while flagging the one clean page. Every one of those patches
+was fitted to *this scanner's* particular damage. Point students at the shape of
+the problem: there is no finite list of ways OCR can be wrong, so a rule that
+recognises `Cureulionidse` will not recognise whatever a different scanner
+produces, and it fails silently, which is the worst way to fail.
 
-print("gate says corrupt?", looks_corrupt(get_page_text(legacy, 5)))
-print(corruption_report(get_page_text(legacy, 5))["suspect_words"][:8])
+Which leaves two honest options, and the notebook should say so plainly:
 
-text, source = page_text_trusted(legacy, 5)   # instant, no model involved
-print("source used:", source)
-```
+1. **You already know.** In practice you know which of your PDFs are scans and
+   which are born-digital — so just OCR the scans. This covers most real work
+   and needs no cleverness at all.
+2. **Ask a model that can reason**, as in stage 2, for the case where you have a
+   mixed pile and genuinely do not know.
 
-Markdown: both routes reach the same page. The gate is instant and free but only
-catches what you wrote patterns for; the agent costs ~52 s per page and
-generalises to decisions you did not anticipate. At 4,500 papers you want the
-gate. While exploring an unfamiliar corpus you want the agent. Choosing where a
-decision lives is the engineering judgement worth taking home.
-
-**Hands-on 3 (capstone):** run both routes over pages 2–8, compare which pages
-each sends to OCR, and tune `looks_corrupt`'s threshold and patterns until they
-agree. Where they disagree, look at the page and decide which was right.
+**Hands-on 3 (capstone):** run the stage-2 loop over pages 2–8 of the legacy PDF
+and over 2–3 pages of the modern one, and record which pages the model sends to
+OCR and why. Then discuss: where would you rather have simply known the answer
+in advance, and where did the model earn its 52 seconds?
 
 - [ ] **Step 4: Add section 8 (cloud) and section 9 (where to go)**
 
@@ -1494,9 +1286,22 @@ pull in section 1: start it, then teach section 0 while it downloads.
 ## Section 7 is a staged failure
 
 The point of the capstone is that the model *fails* first. Do not fix it early.
-Let students watch it read corrupt text, notice the corruption, talk itself out
-of it, and invent a spelling. Then move the decision into code. The lesson is
-what to delegate and what to keep deterministic.
+With `think=False`, let students watch it read the corrupt text, notice the
+corruption, talk itself out of it, and invent a spelling. Then flip the single
+argument to `think=True` and watch it call `ocr_page` and get the answer right.
+The lesson is that `think` is task-shaped: reasoning is wasted on transcription
+and indispensable for judgement.
+
+Then make the stage-3 argument deliberately: there is no regex that does this
+job. Students will reach for one — building it is the obvious idea — so tell
+them what happened when this workshop tried. The gate needed URL stripping,
+hand-tuned tilde and ampersand patterns, and a threshold correction, and it was
+still fitted to one scanner's damage. It failed silently on pages it had not
+been tuned against, which is exactly the failure mode Section 3 warns about.
+
+Land the two honest options: usually you already know which of your PDFs are
+scans, so just OCR those; and when you genuinely have a mixed pile, ask a model
+that can reason.
 
 ## Live demo opportunity
 

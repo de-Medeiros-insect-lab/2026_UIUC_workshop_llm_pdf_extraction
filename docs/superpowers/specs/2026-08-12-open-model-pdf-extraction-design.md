@@ -289,12 +289,31 @@ to Innovation" arc.
 
   Knowing *which* kind of task you have is the transferable skill.
 
-  **Also keep the deterministic gate** (`looks_corrupt()`), not as a
-  replacement but as the cost comparison. The gate is instant and free; the
-  reasoning agent takes ~52 s per page but generalises to decisions you did not
-  anticipate. At 4,500 papers you want the gate; while exploring you want the
-  agent. Hands-on: students run both on pages 2–8 and compare which pages each
-  routes to OCR.
+  **No deterministic quality gate.** An earlier revision of this design carried
+  a `looks_corrupt()` regex heuristic as the "cheap alternative" to the agent.
+  It was built, tested, and then removed, and the attempt is worth recording
+  because it became the argument the section now makes to students.
+
+  Getting it to classify just the two example PDFs correctly required: stripping
+  URLs and DOIs (the clean Taylor & Francis cover scored as badly damaged purely
+  for containing links), hand-tuning patterns for tilde- and ampersand-in-word,
+  then repairing a ratio threshold that was wrong in both directions — it passed
+  four genuinely corrupt pages, one containing `Cureulioni&e.`, while flagging
+  the one clean page. Every patch was fitted to *this* scanner's damage.
+
+  There is no finite list of ways OCR can be wrong. A rule that recognises
+  `Cureulionidse` will not recognise what a different scanner produces, and it
+  fails silently — the worst failure mode, and precisely the one Section 3 warns
+  about. Teaching it as a general technique would be teaching something false.
+
+  So the notebook offers the two honest options: **you already know** which of
+  your PDFs are scans, so OCR those (this covers most real work and needs no
+  cleverness at all); or **ask a model that can reason**, for a genuinely mixed
+  pile where you do not.
+
+  Hands-on: run the loop over pages 2–8 of the legacy PDF and a few pages of the
+  modern one, record which pages the model sends to OCR and why, then discuss
+  where you would rather simply have known in advance.
 
   **Still worth checking before the day:** whether a larger model escalates with
   `think=False`. Untested — `gpt-oss:20b` would not load on Ollama 0.32.9 (stale
