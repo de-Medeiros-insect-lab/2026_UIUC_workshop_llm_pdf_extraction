@@ -31,7 +31,7 @@ around "start it and talk," not around the specific seconds.
 **Section 7's capstone (Hands-on 3) is the biggest timing risk in the whole
 workshop.** It runs nine `think=True` tool loops back to back, alternating
 between the chat model and the OCR model on almost every page. On the M1 Max
-that is well over ten minutes; expect longer on a shared T4. Section 7 only
+this notebook's own run took about seven and a half minutes (individual pages ranged from 12 to 97 seconds); expect longer on a shared T4. Section 7 only
 has 45 minutes total — start the capstone cell early and keep teaching over
 it, the same as the model pull in section 1, or it will eat the section.
 
