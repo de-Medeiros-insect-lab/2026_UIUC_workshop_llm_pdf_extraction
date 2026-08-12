@@ -66,9 +66,11 @@ responsibility (`pdf.py`, `models.py`, `loop.py`), not by layer.
 ### Task 1: Repo scaffolding
 
 **Files:**
-- Create: `environment.yml`, `README.md`, `tests/conftest.py`
+- Create: `environment.yml`, `tests/conftest.py`
 - Modify: `.gitignore`
 - Remove from tracking: `pdf_data_extraction.ipynb`
+
+(`README.md` is Task 10's deliverable, not this one.)
 
 **Interfaces:**
 - Consumes: nothing
