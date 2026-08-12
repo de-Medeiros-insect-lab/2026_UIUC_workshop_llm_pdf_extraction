@@ -173,9 +173,10 @@ extraction runs clean, and a species arrives attributed to family
 `Cureulionidse`, which matches no taxonomic authority. Nothing errors; the data
 is simply wrong, at scale.
 
-So the agentic loop gets an honest job: not "is there text?" but **"is this
-text trustworthy?"** And because the clean page image is available for
-comparison, the improvement can be *shown*.
+So the pipeline gets an honest job: not "is there text?" but **"is this text
+trustworthy?"** And because the clean page image is available for comparison,
+the improvement can be *shown*. Note that answering that question turns out to
+be work for code rather than for the model — see Section 7 in § Running order.
 
 **Prepared file:** `example_pdfs/Marshall1929_AnnMagNatHist.pdf`, 8 pages,
 processed for distribution: document info and XMP normalised to the article's own
@@ -252,8 +253,37 @@ to Innovation" arc.
   types, enums vs free text, encoding "not applicable", and Pydantic
   validators that catch semantically-wrong-but-syntactically-valid output (a
   5000 mm beetle). More durable knowledge than prompt tricks.
-- **Section 7** — the agentic loop: model gets `get_page_text` and `ocr_page`
-  and decides per page, judging text *quality* rather than mere presence.
+- **Section 7** — the agentic loop, taught as *where to put the decision*.
+
+  **Measured before planning:** `qwen3.5:9b` completes a multi-turn tool loop
+  correctly, but **will not escalate to `ocr_page` on its own judgement**.
+  Tested across four system-prompt formulations (naive; forbidding silent
+  repair; an explicit count-the-garbled-words procedure; and a task demanding a
+  verifiable real family name) it always called `get_page_text`, noticed the
+  corruption, rationalised it as "minor OCR artifacts", and answered anyway —
+  hallucinating `Cureulonidae` / `Curelonidae` / `Curculionidae` in one reply
+  and asserting the wrong one was valid.
+
+  So the section teaches the loop mechanics *and* the limit:
+
+  1. Give the model both tools with a reasonable prompt. Run it. It fails, live.
+  2. Attempt to fix by prompting. Show it still fails. Prompt engineering has
+     limits, and this is a cheap, honest place to learn that.
+  3. Diagnose: self-assessment of data quality is the wrong job for a 9B model,
+     which is trained to be helpful and will therefore produce *an* answer.
+  4. Move the decision into code — a deterministic `looks_corrupt()` gate that
+     routes to `ocr_page`. The model still uses the tools; the *gate* is code.
+  5. Re-run; extraction is now correct.
+
+  This is a better lesson than "the agent figures it out": it teaches what to
+  delegate to a model and what to keep deterministic, which is the judgement
+  that actually transfers to their own pipelines. Hands-on: students implement
+  and tune the gate.
+
+  **Open question, deliberately left open for Section 8:** does a larger model
+  escalate? Untested — `gpt-oss:20b` would not load on Ollama 0.32.9 (stale
+  model file). Verify against a cloud model before the workshop; if it does
+  escalate, that is a strong payoff for Section 8 and should be shown.
 - **Section 8** — `qwen3.5:9b` → `qwen3.5:cloud`, identical code. Free tier,
   no credit card, self-issued key in Colab Secrets. This preserves the 2025
   security lesson ("never hardcode keys") without the billing anxiety, and
