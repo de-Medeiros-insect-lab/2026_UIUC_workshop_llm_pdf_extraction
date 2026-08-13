@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 from typing import List, Optional
 
-import fitz
+import pymupdf as fitz
 import ollama
 import pandas as pd
 from pydantic import BaseModel, Field, field_validator, model_validator

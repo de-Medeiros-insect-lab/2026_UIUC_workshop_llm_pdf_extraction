@@ -1,4 +1,6 @@
-import pytest, fitz, pathlib
+import pathlib
+import pymupdf as fitz
+import pytest
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 LEGACY = REPO / "example_pdfs" / "Marshall1929_AnnMagNatHist.pdf"
