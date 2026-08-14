@@ -47,6 +47,19 @@ own specialty. Pause and discuss the error. The model's output may differ on
 the day, so read whatever answer comes back and check it live rather than
 expecting that exact error.
 
+## Send this out in advance
+
+Ask students to do both of these **before** the session, or you will lose ten
+minutes of Session 5 to account signups:
+
+1. Create a free account at <https://ollama.com> (no card needed).
+2. Create an API key at <https://ollama.com/settings/keys> and keep it
+   somewhere they can paste from. Session 5 walks them through adding it to
+   Colab Secrets; they only need to arrive with the key itself.
+
+Everything in Sessions 1–4 runs locally and needs no key, so a student who
+turns up without one can still follow the whole morning.
+
 ## Before you begin
 
 - Ask everyone to set Runtime → Change runtime type → T4 **before** running
@@ -54,6 +67,8 @@ expecting that exact error.
 - Pair up anyone without a GPU immediately. Colab refuses free GPUs at busy
   times. There is deliberately **no CPU code path** in this notebook — a student
   without a GPU cannot run it and must pair up.
+- The free cloud tier is metered per account. Keep Session 5's cloud calls
+  small — one short extraction each is plenty to make the point.
 
 ## Section 7 is a staged failure
 

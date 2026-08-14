@@ -520,8 +520,14 @@ EXTRACT_PROMPT = (
     "Do not invent traits that are not stated.\\n\\n"
 )
 
-def extract(text, schema=SPECIES_SCHEMA, model=CHAT_MODEL):
-    reply = ollama.chat(
+def extract(text, schema=SPECIES_SCHEMA, model=CHAT_MODEL, client=None):
+    \"\"\"Pull structured data out of text.
+
+    client is None for the local server. Session 5 passes a cloud client
+    instead, which is the only change needed to run this on a far bigger model.
+    \"\"\"
+    chat = (client or ollama).chat
+    reply = chat(
         model=model,
         messages=[{"role": "user", "content": EXTRACT_PROMPT + text}],
         format=schema,
@@ -752,24 +758,67 @@ does not cost you the whole run.
 """)
 
 md("""
-### A bigger model, same code
+### Get your own API key
 
-Ollama can run large models on their servers. Sign up free at ollama.com, make
-an API key, and add it to Colab Secrets (🔑 in the left sidebar) as
-`OLLAMA_API_KEY`. Only the model name changes.
+The models we have used so far fit on this machine. Bigger ones do not, but
+Ollama runs them on their servers and the code barely changes.
+
+You need a key of your own. It is free and takes two minutes:
+
+1. Go to **[ollama.com](https://ollama.com)** and create an account. No card
+   required.
+2. Go to **[ollama.com/settings/keys](https://ollama.com/settings/keys)** →
+   **Create key**. Copy it. You will not be shown it again.
+3. Back in Colab, click the **🔑 key icon** in the left sidebar.
+4. **+ Add new secret**. Name it exactly `OLLAMA_API_KEY`, paste your key into
+   the value box, and turn on **Notebook access**.
+
+**Never paste a key into a cell.** Anything typed into a notebook gets shared
+when the notebook does — with your collaborators, in your repository, in the
+copy you email to a student. Colab Secrets keeps it out of the file.
 """)
 
 code("""
-CLOUD_MODEL = "qwen3.5:cloud"
+from ollama import Client
+
+def cloud_client():
+    \"\"\"A client pointed at Ollama's servers instead of this machine.
+
+    Same interface as the local one, so everything we have written already
+    works against it -- we only have to say where to send the request and
+    who is asking.
+    \"\"\"
+    try:
+        from google.colab import userdata
+        key = userdata.get("OLLAMA_API_KEY")
+    except Exception:
+        key = os.environ.get("OLLAMA_API_KEY")
+    if not key:
+        raise RuntimeError(
+            "No key found. Add OLLAMA_API_KEY to Colab Secrets (key icon, "
+            "left sidebar) and switch on Notebook access for this notebook.")
+    return Client(host="https://ollama.com",
+                  headers={"Authorization": "Bearer " + key})
+
+# Browse what is available at https://ollama.com/search?c=cloud
+# Note: no "-cloud" suffix when talking to the servers directly.
+CLOUD_MODEL = "gpt-oss:120b"
 
 try:
-    from google.colab import userdata
-    os.environ["OLLAMA_API_KEY"] = userdata.get("OLLAMA_API_KEY")
-    data = extract(get_page_text(modern, 2)[:4000], model=CLOUD_MODEL)
-    print(to_table(data).head())
+    cloud = cloud_client()
+    data = extract(get_page_text(modern, 2)[:4000],
+                   model=CLOUD_MODEL, client=cloud)
+    display(to_table(data).head())
 except Exception as exc:
     print("Cloud step skipped:", exc)
-    print("Add OLLAMA_API_KEY to Colab Secrets to run this.")
+""")
+
+md("""
+That is the whole difference: same prompt, same schema, same `extract`
+function — a different client and a model roughly a hundred times larger.
+
+The free tier is metered, so keep cloud calls small. Everything else today
+runs on the machine in front of you.
 """)
 
 md("""
