@@ -29,12 +29,93 @@ your own machine.
 5. **Scaling up** — a bigger model, and a whole folder of PDFs
 
 **Set your runtime to a GPU before you start:** Runtime → Change runtime type → T4.
+Then click *Connect*
 """)
 
 # ════════════════════════════════════════════════════════ SESSION 1
 md("""
 ---
 # Session 1 — Setup, and talking to a model
+
+## 1.1 - Interacting with Ollama through the desktop app
+
+You were asked to install the [Ollama Desktop app](https://ollama.com/) before the workshop. Let's first interact with it locally on your computer, and later we will do the same programatically through this python notebook.
+
+Ollama is one of the programs that you can use to deploy large language models with open weights. These are [open-source models](https://en.wikipedia.org/wiki/Open-source_artificial_intelligence) that you can run for free on your own device, or rent cloud computing to run. These include the models trained by Chinese companies and highly talked about in the media, but some US-based companies also release open source models (openAI has [a few, now a bit outdated](https://ollama.com/library/gpt-oss), and meta [just released a new one](https://ollama.com/library/muse-glimmer)).
+
+You do not need Ollama to run open models, but Ollama offers a convenient engine that automatically figures out the best way to deploy a model on your hardware. For pure python, you can check the [Transformers library and models hosted by Huggingface](https://huggingface.co/docs/transformers/en/index). We will have Ollama running as a server in the background in this workshop and use python to communicate with it, for convenience. As you learn more about using LLMs, you can explore the Transformers library, [vLLM](https://vllm.ai/), [unsloth](https://unsloth.ai/) and other ways to do it.
+
+Let's start opening Ollama on your own computer. Click on *New chat*, choose the model *deepseek-r1:1.5b*, and start chatting. The interface should be familiar to you, similar to other web-based chatbots.
+* We are using *deepseek-r1:1.5b* because it is a very small model that can run on pretty much any of your computers, whether or not you have a powerfull GPU. Let's start with this one so everyone is on the same page.
+* **DO NOT USE A CLOUD MODEL YET**
+""")
+
+md("""
+## 1.2 - Interacting with Ollama through the command line
+
+Now that you are comfortable with the graphical user interface, let's chat with Ollama through a command line, which is one level closer to what we will do here. While Ollama is open, open a terminal (for Windows, Windows PowerShell; for Macs, Terminal; for Ubuntu, GNOME Shell, etc).
+
+Type the following command:
+```{bash}
+curl http://localhost:11434/v1/chat/completions -d '{ "model": "deepseek-r1:1.5b", "messages": [ { "role": "user", "content": "Which insect is the best?" } ] }'
+```
+""")
+
+md("""
+### What came back
+
+The reply is one long line of JSON. Here it is laid out, with the long text
+shortened. The numbered markers are the parts worth knowing.
+
+<div style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;line-height:1.7;background:#f6f8fa;color:#24292f;padding:16px 18px;border:1px solid #d0d7de;border-radius:8px;overflow-x:auto">
+{<br>
+&nbsp;&nbsp;<span style="color:#0550ae">"id"</span>: <span style="color:#0a3069">"chatcmpl-890"</span>,<br>
+&nbsp;&nbsp;<span style="color:#0550ae">"object"</span>: <span style="color:#0a3069">"chat.completion"</span>,<br>
+&nbsp;&nbsp;<span style="color:#0550ae">"created"</span>: <span style="color:#0550ae">1786808005</span>,<br>
+&nbsp;&nbsp;<span style="color:#0550ae">"model"</span>: <span style="color:#0a3069">"deepseek-r1:1.5b"</span>,&nbsp;&nbsp;<span style="background:#ddf4ff;border-radius:10px;padding:1px 7px;color:#0550ae;font-weight:600">1</span><br>
+&nbsp;&nbsp;<span style="color:#0550ae">"choices"</span>: [<br>
+&nbsp;&nbsp;&nbsp;&nbsp;{<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#0550ae">"index"</span>: <span style="color:#0550ae">0</span>,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#0550ae">"message"</span>: {<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#0550ae">"role"</span>: <span style="color:#0a3069">"assistant"</span>,&nbsp;&nbsp;<span style="background:#ddf4ff;border-radius:10px;padding:1px 7px;color:#0550ae;font-weight:600">2</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#0550ae">"content"</span>: <span style="color:#0a3069">"The best insect, as viewed from different perspectives&hellip;"</span>,&nbsp;&nbsp;<span style="background:#dafbe1;border-radius:10px;padding:1px 7px;color:#116329;font-weight:600">3</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#0550ae">"reasoning"</span>: <span style="color:#0a3069">"Okay, so I'm trying to figure out which insect&hellip;"</span>&nbsp;&nbsp;<span style="background:#fff1e5;border-radius:10px;padding:1px 7px;color:#953800;font-weight:600">4</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;},<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#0550ae">"finish_reason"</span>: <span style="color:#0a3069">"stop"</span>&nbsp;&nbsp;<span style="background:#ffe9e9;border-radius:10px;padding:1px 7px;color:#a40e26;font-weight:600">5</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;}<br>
+&nbsp;&nbsp;],<br>
+&nbsp;&nbsp;<span style="color:#0550ae">"usage"</span>: {<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#0550ae">"prompt_tokens"</span>: <span style="color:#0550ae">9</span>,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#0550ae">"completion_tokens"</span>: <span style="color:#0550ae">1219</span>,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#0550ae">"total_tokens"</span>: <span style="color:#0550ae">1228</span><br>
+&nbsp;&nbsp;}&nbsp;&nbsp;<span style="background:#f3e8ff;border-radius:10px;padding:1px 7px;color:#6639ba;font-weight:600">6</span><br>
+}
+</div>
+
+<table style="font-size:14px;border-collapse:collapse;margin-top:12px">
+<tr><td style="padding:5px 12px 5px 0;vertical-align:top"><span style="background:#ddf4ff;border-radius:10px;padding:1px 7px;color:#0550ae;font-weight:600">1</span></td>
+<td style="padding:5px 0"><code>model</code> — which model answered. Worth recording: results are not comparable across models.</td></tr>
+<tr><td style="padding:5px 12px 5px 0;vertical-align:top"><span style="background:#ddf4ff;border-radius:10px;padding:1px 7px;color:#0550ae;font-weight:600">2</span></td>
+<td style="padding:5px 0"><code>role</code> — always <code>assistant</code> for a reply. You send <code>user</code> and <code>system</code>; it sends back <code>assistant</code>.</td></tr>
+<tr><td style="padding:5px 12px 5px 0;vertical-align:top"><span style="background:#dafbe1;border-radius:10px;padding:1px 7px;color:#116329;font-weight:600">3</span></td>
+<td style="padding:5px 0"><code>content</code> — <b>the answer</b>. This is the part you almost always want, and the only part a chat window shows you.</td></tr>
+<tr><td style="padding:5px 12px 5px 0;vertical-align:top"><span style="background:#fff1e5;border-radius:10px;padding:1px 7px;color:#953800;font-weight:600">4</span></td>
+<td style="padding:5px 0"><code>reasoning</code> — the model thinking out loud before answering, kept separate. Only reasoning models return this.</td></tr>
+<tr><td style="padding:5px 12px 5px 0;vertical-align:top"><span style="background:#ffe9e9;border-radius:10px;padding:1px 7px;color:#a40e26;font-weight:600">5</span></td>
+<td style="padding:5px 0"><code>finish_reason</code> — <code>stop</code> means it finished. <code>length</code> means it hit a limit mid-sentence, and your answer is cut off. Always check this.</td></tr>
+<tr><td style="padding:5px 12px 5px 0;vertical-align:top"><span style="background:#f3e8ff;border-radius:10px;padding:1px 7px;color:#6639ba;font-weight:600">6</span></td>
+<td style="padding:5px 0"><code>usage</code> — tokens in, tokens out. Roughly words. This is what you are charged for on paid services, and what fills the model's limited memory.</td></tr>
+</table>
+
+Notice how much of this is *not* the answer. A chat window shows you 3 and
+hides the rest. Working programmatically, you see all of it — and 5 and 6 are
+the two that will bite you at scale.
+""")
+
+md("""
+## 1.3 - Interacting with Ollama through a cloud Python notebook
+
+From now on, we will be running Ollama, but not on your own computer. This colab notebook runs on a cloud instance on a Google server. The free tier is limited to GPUs with 16 GB of memory (so this is the maximum model size + data we can use). We will install Ollama on the server, download models and interact with them.
 
 **What we're doing:** installing Ollama, downloading a language model, and
 sending it our first messages from Python.
