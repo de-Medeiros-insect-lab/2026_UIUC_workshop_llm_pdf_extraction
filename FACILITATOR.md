@@ -49,18 +49,22 @@ expecting that exact error.
 
 ## Send this out in advance
 
-Ask students to do all of these **before** the session:
+Students have already been asked to install the **Ollama desktop app**.
+Session 1.1 starts in that app rather than the notebook, so it is worth one
+reminder — anyone without it is locked out of the opening exercise, and there
+is no Colab fallback for that part.
 
-1. Install the **Ollama desktop app** from <https://ollama.com>. Session 1.1
-   starts in that app, not in the notebook, so anyone without it is locked out
-   of the opening exercise.
-2. Pull `deepseek-r1:1.5b` in the app. It is small enough for any laptop, GPU
-   or not, which is why Session 1 uses it — everyone sees the same thing.
-3. Create a free account at <https://ollama.com> (no card needed) and an API
-   key at <https://ollama.com/settings/keys>, kept somewhere they can paste
-   from. Session 5 walks them through adding it to Colab Secrets; they only
-   need to arrive with the key itself. Twenty simultaneous signups would cost
-   you ten minutes of that session.
+The one thing still worth asking for ahead of time:
+
+- A free account at <https://ollama.com> (no card needed) and an API key from
+  <https://ollama.com/settings/keys>, kept somewhere they can paste from.
+  Session 5 walks them through adding it to Colab Secrets; they only need to
+  arrive with the key. Twenty simultaneous signups would cost you ten minutes
+  of that session.
+
+`deepseek-r1:1.5b` does **not** need pulling in advance — it is about a
+gigabyte and lands in a minute, so let them pull it live in Session 1.1. That
+is also a useful thing for them to watch happen once.
 
 Everything in Sessions 1–4 runs locally and needs no key, so a student who
 turns up without one can still follow the whole morning.
