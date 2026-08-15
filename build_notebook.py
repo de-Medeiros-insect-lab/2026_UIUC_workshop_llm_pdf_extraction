@@ -57,38 +57,34 @@ Now that you are comfortable with the graphical user interface, let's chat with 
 
 Type the following command:
 ```{bash}
-curl http://localhost:11434/v1/chat/completions -d '{ "model": "deepseek-r1:1.5b", "messages": [ { "role": "user", "content": "Which insect is the best?" } ] }'
+curl http://localhost:11434/v1/chat/completions -H "Content-Type: application/json" -d '{ "model": "deepseek-r1:1.5b", "messages": [ { "role": "user", "content": "Which insect is the best? One must choose one and one only" } ] }'
 ```
 """)
 
 md("""
 ### What came back
 
-The reply is one long line of JSON. Here it is laid out, with the long text
-shortened. The numbered markers are the parts worth knowing.
+One long line of JSON. Here it is laid out. The numbered markers are the parts
+worth knowing.
 
 <div style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;line-height:1.7;background:#f6f8fa;color:#24292f;padding:16px 18px;border:1px solid #d0d7de;border-radius:8px;overflow-x:auto">
 {<br>
-&nbsp;&nbsp;<span style="color:#0550ae">"id"</span>: <span style="color:#0a3069">"chatcmpl-890"</span>,<br>
+&nbsp;&nbsp;<span style="color:#0550ae">"id"</span>: <span style="color:#0a3069">"chatcmpl-364"</span>,<br>
 &nbsp;&nbsp;<span style="color:#0550ae">"object"</span>: <span style="color:#0a3069">"chat.completion"</span>,<br>
-&nbsp;&nbsp;<span style="color:#0550ae">"created"</span>: <span style="color:#0550ae">1786808005</span>,<br>
-&nbsp;&nbsp;<span style="color:#0550ae">"model"</span>: <span style="color:#0a3069">"deepseek-r1:1.5b"</span>,&nbsp;&nbsp;<span style="background:#ddf4ff;border-radius:10px;padding:1px 7px;color:#0550ae;font-weight:600">1</span><br>
+&nbsp;&nbsp;<span style="color:#0550ae">"created"</span>: <span style="color:#0550ae">1786808743</span>,<br>
+&nbsp;&nbsp;<span style="color:#0550ae">"model"</span>: <span style="color:#0a3069">"deepseek-r1:1.5b"</span>&nbsp;&nbsp;<span style="background:#ddf4ff;border-radius:10px;padding:1px 7px;color:#0550ae;font-weight:600">1</span><br>
 &nbsp;&nbsp;<span style="color:#0550ae">"choices"</span>: [<br>
 &nbsp;&nbsp;&nbsp;&nbsp;{<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#0550ae">"index"</span>: <span style="color:#0550ae">0</span>,<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#0550ae">"message"</span>: {<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#0550ae">"role"</span>: <span style="color:#0a3069">"assistant"</span>,&nbsp;&nbsp;<span style="background:#ddf4ff;border-radius:10px;padding:1px 7px;color:#0550ae;font-weight:600">2</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#0550ae">"content"</span>: <span style="color:#0a3069">"The best insect, as viewed from different perspectives&hellip;"</span>,&nbsp;&nbsp;<span style="background:#dafbe1;border-radius:10px;padding:1px 7px;color:#116329;font-weight:600">3</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#0550ae">"reasoning"</span>: <span style="color:#0a3069">"Okay, so I'm trying to figure out which insect&hellip;"</span>&nbsp;&nbsp;<span style="background:#fff1e5;border-radius:10px;padding:1px 7px;color:#953800;font-weight:600">4</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#0550ae">"content"</span>: &hellip;&nbsp;&nbsp;<span style="background:#dafbe1;border-radius:10px;padding:1px 7px;color:#116329;font-weight:600">3</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#0550ae">"reasoning"</span>: &hellip;&nbsp;&nbsp;<span style="background:#fff1e5;border-radius:10px;padding:1px 7px;color:#953800;font-weight:600">4</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;},<br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#0550ae">"finish_reason"</span>: <span style="color:#0a3069">"stop"</span>&nbsp;&nbsp;<span style="background:#ffe9e9;border-radius:10px;padding:1px 7px;color:#a40e26;font-weight:600">5</span><br>
 &nbsp;&nbsp;&nbsp;&nbsp;}<br>
 &nbsp;&nbsp;],<br>
-&nbsp;&nbsp;<span style="color:#0550ae">"usage"</span>: {<br>
-&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#0550ae">"prompt_tokens"</span>: <span style="color:#0550ae">9</span>,<br>
-&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#0550ae">"completion_tokens"</span>: <span style="color:#0550ae">1219</span>,<br>
-&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#0550ae">"total_tokens"</span>: <span style="color:#0550ae">1228</span><br>
-&nbsp;&nbsp;}&nbsp;&nbsp;<span style="background:#f3e8ff;border-radius:10px;padding:1px 7px;color:#6639ba;font-weight:600">6</span><br>
+&nbsp;&nbsp;<span style="color:#0550ae">"usage"</span>: { <span style="color:#0550ae">"prompt_tokens"</span>: <span style="color:#0550ae">16</span>, <span style="color:#0550ae">"completion_tokens"</span>: <span style="color:#0550ae">638</span>, <span style="color:#0550ae">"total_tokens"</span>: <span style="color:#0550ae">654</span> }&nbsp;&nbsp;<span style="background:#f3e8ff;border-radius:10px;padding:1px 7px;color:#6639ba;font-weight:600">6</span><br>
 }
 </div>
 
@@ -98,18 +94,71 @@ shortened. The numbered markers are the parts worth knowing.
 <tr><td style="padding:5px 12px 5px 0;vertical-align:top"><span style="background:#ddf4ff;border-radius:10px;padding:1px 7px;color:#0550ae;font-weight:600">2</span></td>
 <td style="padding:5px 0"><code>role</code> — always <code>assistant</code> for a reply. You send <code>user</code> and <code>system</code>; it sends back <code>assistant</code>.</td></tr>
 <tr><td style="padding:5px 12px 5px 0;vertical-align:top"><span style="background:#dafbe1;border-radius:10px;padding:1px 7px;color:#116329;font-weight:600">3</span></td>
-<td style="padding:5px 0"><code>content</code> — <b>the answer</b>. This is the part you almost always want, and the only part a chat window shows you.</td></tr>
+<td style="padding:5px 0"><code>content</code> — <b>the answer</b>. The only part a chat window shows you.</td></tr>
 <tr><td style="padding:5px 12px 5px 0;vertical-align:top"><span style="background:#fff1e5;border-radius:10px;padding:1px 7px;color:#953800;font-weight:600">4</span></td>
-<td style="padding:5px 0"><code>reasoning</code> — the model thinking out loud before answering, kept separate. Only reasoning models return this.</td></tr>
+<td style="padding:5px 0"><code>reasoning</code> — the model thinking out loud first, kept separate. Only reasoning models return this.</td></tr>
 <tr><td style="padding:5px 12px 5px 0;vertical-align:top"><span style="background:#ffe9e9;border-radius:10px;padding:1px 7px;color:#a40e26;font-weight:600">5</span></td>
-<td style="padding:5px 0"><code>finish_reason</code> — <code>stop</code> means it finished. <code>length</code> means it hit a limit mid-sentence, and your answer is cut off. Always check this.</td></tr>
+<td style="padding:5px 0"><code>finish_reason</code> — <code>stop</code> means it finished. <code>length</code> means it hit a limit mid-sentence and your answer is cut off. Always check this.</td></tr>
 <tr><td style="padding:5px 12px 5px 0;vertical-align:top"><span style="background:#f3e8ff;border-radius:10px;padding:1px 7px;color:#6639ba;font-weight:600">6</span></td>
-<td style="padding:5px 0"><code>usage</code> — tokens in, tokens out. Roughly words. This is what you are charged for on paid services, and what fills the model's limited memory.</td></tr>
+<td style="padding:5px 0"><code>usage</code> — tokens in, tokens out. Roughly words. What you are charged for on paid services, and what fills the model's limited memory.</td></tr>
 </table>
+""")
 
-Notice how much of this is *not* the answer. A chat window shows you 3 and
-hides the rest. Working programmatically, you see all of it — and 5 and 6 are
-the two that will bite you at scale.
+md("""
+### <span style="background:#dafbe1;border-radius:10px;padding:1px 7px;color:#116329;font-weight:600">3</span> &nbsp;The answer
+
+<div style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;line-height:1.65;background:#f0fff4;color:#24292f;padding:14px 16px;border-left:4px solid #2da44e;border-radius:6px">
+Ants are the best because they excel in pollination, carrying and spreading
+pollens throughout most of their lifetime in their home regions. This makes
+them highly effective in ensuring plant reproduction.
+</div>
+
+Twenty-eight words, out of 638 the model generated. Everything else was
+thinking.
+""")
+
+md("""
+### <span style="background:#fff1e5;border-radius:10px;padding:1px 7px;color:#953800;font-weight:600">4</span> &nbsp;The reasoning
+
+<div style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:1.6;background:#fffaf5;color:#24292f;padding:14px 16px;border-left:4px solid #fb8500;border-radius:6px;max-height:300px;overflow-y:auto;white-space:pre-wrap">Alright, so I need to figure out which insect is the best. I guess the user is asking for the most effective or the best known insect. Let me start by thinking about insects in general—there are over 30, each with different roles and uses, from ants to moles.
+
+I remember that ants are generally noted for their work in pollination. They carry fruit all year around and are crucial for pollination in their native regions. Moles, on the other hand, I think are good at defense and scaring off neighbors, which probably helps them survive. They can be aggressive and make aggressive behavior.
+
+Wait, but if I'm comparing ants and moles, which one is better in what ways? The user said to choose one only, but that's confusing because they're two different insects with distinct roles. Maybe the user is asking which kind is the best or perhaps comparing based on specific aspects.
+
+Let me think about size. Moles are generally smaller than ants, so ants are larger. But ants are more effective in certain ways. Maybe I should consider their reproductive success in pollination, which ants do more than moles. Also, ants might be more aggressive, so if the user values that, perhaps ants are better.
+
+Another angle is their behavior. Moles are known for being aggressive, which can be advantageous in some environments. However, they might not handle certain tasks as efficiently as ants. On the flip side, if the focus is on defense, moles might be better, but their reputation as scaring off neighbors is something ants don't have.
+
+I'm a bit torn because there's no universal "best." The answer will depend on the criteria. If it's based on ability to pollinate, ants are better. If it's based on defense, moles might be better. But since the user is asking for an insect, not a group, perhaps they want a single answer. Maybe the ants are superior at pollination.
+
+Alternatively, maybe the question is about the best insect for garden use, considering factors like defense, size, and functionality. In that case, moles could be better for defense but less effective in pollination. But if considering a mix, like defense and pollination, maybe it's a balance.
+
+I'm also thinking about the user's perspective. They might be looking for an insect that's efficient in their specific niche, like for pollination, or maybe in defense. Without knowing exactly, it's a bit unclear. But I'll conclude that while there might not be a single best insect, between the two, considering pollination, ants are superior. So I'll say ants are the best because they excel in pollination and are effective.
+
+Wait, but the user might be looking for something else, like functional traits or specific environmental roles. So perhaps the answer could vary based on the criteria. But sticking with pollination seems solid, so ants are my choice for that.</div>
+
+**Read it as an entomologist.** This is a small model, and it shows:
+
+- *"there are over 30"* — thirty what?
+- *"from ants to moles"*, and then five paragraphs comparing them — **moles are mammals**
+- *"They carry fruit all year around"*
+- and the conclusion it commits to: **ants excel at pollination**
+
+The reasoning is not a proof. It is more text, generated the same way as the
+answer, and it can be fluent and wrong from start to finish. It is useful for
+seeing *how* an answer was reached — not for trusting that it was reached
+correctly.
+
+Two things to take from this response:
+
+- A chat window shows you <span style="background:#dafbe1;border-radius:9px;padding:0 6px;color:#116329;font-weight:600">3</span> only. Working
+  programmatically you get all of it, and
+  <span style="background:#ffe9e9;border-radius:9px;padding:0 6px;color:#a40e26;font-weight:600">5</span> and
+  <span style="background:#f3e8ff;border-radius:9px;padding:0 6px;color:#6639ba;font-weight:600">6</span> are the two that
+  cause trouble at scale — silently truncated answers, and a context window you
+  did not know you were filling.
+- 638 tokens spent to produce 28 words of answer. Reasoning is not free.
 """)
 
 md("""
