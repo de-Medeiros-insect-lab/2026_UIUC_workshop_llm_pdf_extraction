@@ -11,6 +11,7 @@ example_pdfs/*.pdf
 my_pdfs/
 
 # Run output
+processed/
 results/
 legacy_ocr.json
 my_results.csv

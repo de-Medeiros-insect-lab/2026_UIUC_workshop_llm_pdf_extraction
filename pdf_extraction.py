@@ -6,9 +6,21 @@
 
 For each PDF in the folder this asks a reasoning model one question first — can
 this document's own text layer be trusted, or do the pages have to be re-read
-from their images? — and then reads the document whichever way the answer says,
-pulls out the figures, asks for exactly the fields your schema describes, and
-returns one table.
+from their images? — and then writes the document out as a folder of markdown
+pages, each in reading order with its figures linked where they appeared:
+
+    processed/Marshall1929_AnnMagNatHist/
+        page-001.md ... page-008.md
+        figures/p006-fig01.png
+        document.json
+
+Go and read those. They are what the model is given, and keeping a caption next
+to the figure it describes is the whole reason for reading a page in order
+rather than collecting all the prose and then all the pictures.
+
+From there it asks for exactly the fields your schema describes and returns one
+table. Pages already written are never redone, so an interrupted run resumes,
+and deleting a page has just that page re-read.
 
 The work is done in three passes — every judgement, then every transcription,
 then every extraction — so that only one model is ever resident. Two models of
@@ -362,6 +374,56 @@ def figures_from_objects(doc, page):
     return found
 
 
+def ocr_elements(ocr_text):
+    """The OCR model's regions in the order it read them: (label, box, text).
+
+    deepseek-ocr writes a marker for each region and then that region's
+    content, so the text between one marker and the next belongs to the first.
+    """
+    marks = list(re.finditer(
+        r"(\w+)\s*\[\[\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+)\s*\]\]", ocr_text))
+    found = []
+    for i, mark in enumerate(marks):
+        stop = marks[i + 1].start() if i + 1 < len(marks) else len(ocr_text)
+        box = ("region", *(int(mark.group(k)) for k in range(2, 6)))
+        found.append((mark.group(1), box, ocr_text[mark.end():stop].strip()))
+    return found
+
+
+def page_elements(doc, page, transcript=None, dpi=150):
+    """One page as ("text", str) and ("figure", Image) pieces, in reading order.
+
+    This is what lets a caption stay with its figure: we keep the order the
+    page was laid out in rather than collecting all the text and then all the
+    pictures.
+    """
+    if transcript is not None:                      # a scan: the OCR model
+        pieces = []                                 # already read it in order
+        for label, box, text in ocr_elements(transcript):
+            if label == "image":
+                pieces.append(("figure", crop_region(doc, page, box, dpi=dpi)))
+            elif text:
+                pieces.append(("text", text))
+        return pieces
+
+    pg = doc[page - 1]                              # born-digital: sort by
+    page_area = pg.rect.width * pg.rect.height      # where things sit
+    placed = []
+    for x0, y0, x1, y1, text, _, kind in pg.get_text("blocks", sort=True):
+        if kind == 0 and text.strip():
+            placed.append((y0, ("text", text.strip())))
+    for xref, *_ in pg.get_images(full=True):
+        rects = pg.get_image_rects(xref)
+        if not rects:
+            continue
+        share = max((r.width * r.height) / page_area for r in rects)
+        if not MIN_FIGURE_AREA <= share <= MAX_FIGURE_AREA:
+            continue
+        figure = Image.open(io.BytesIO(doc.extract_image(xref)["image"]))
+        placed.append((rects[0].y0, ("figure", figure)))
+    return [piece for _, piece in sorted(placed, key=lambda item: item[0])]
+
+
 def as_image_data(fig, max_side=1024):
     """A figure, shrunk if it is huge, encoded the way a model wants it."""
     small = fig.copy()
@@ -373,54 +435,88 @@ def as_image_data(fig, max_side=1024):
 
 # --------------------------------------------------------------------- documents
 
-def transcribe(doc, max_pages=None, dpi=DEFAULT_DPI, cache_path=None, log=None):
-    """Every page of a document, re-read from its image. {page: text}
+FIGURE_LINK = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
 
-    With a cache_path, each page is written as soon as it is transcribed and
-    read back on a later run, so a run that dies at page 40 of 60 does not
-    start over. This is the expensive pass, and the one most likely to be
-    interrupted.
+
+def process_pdf(path, out_dir="processed", needs_ocr=False, max_pages=None,
+                dpi=DEFAULT_DPI, log=None):
+    """Turn a PDF into a folder you can open and read.
+
+        processed/Marshall1929_AnnMagNatHist/
+            page-001.md ... page-008.md
+            figures/p006-fig01.png
+            document.json
+
+    Each page is markdown in reading order, with its figures linked where they
+    appeared, so a caption stays next to the picture it belongs to. Open one in
+    any markdown viewer and you see what the model is about to be given.
+
+    Pages already written are left alone, so an interrupted run picks up where
+    it stopped -- and deleting one page has just that page redone.
     """
-    pages = {}
-    if cache_path and os.path.exists(cache_path):
-        with open(cache_path) as fh:
-            pages = {int(page): text for page, text in json.load(fh).items()}
+    name = os.path.splitext(os.path.basename(path))[0]
+    folder = os.path.join(out_dir, name)
+    os.makedirs(os.path.join(folder, "figures"), exist_ok=True)
 
+    doc = open_pdf(path)
     last = doc.page_count if max_pages is None else min(max_pages, doc.page_count)
     for page in range(1, last + 1):
-        if page in pages:
+        page_file = os.path.join(folder, f"page-{page:03d}.md")
+        if os.path.exists(page_file):
             if log:
-                log(f"    page {page}: kept from an earlier run")
+                log(f"    page {page}: already done")
             continue
-        pages[page] = ocr_page(doc, page, dpi=dpi)
+
+        transcript = ocr_page(doc, page, dpi=dpi) if needs_ocr else None
+        lines, figures = [], 0
+        for kind, value in page_elements(doc, page, transcript):
+            if kind == "text":
+                lines.append(value)
+            else:
+                figures += 1
+                relative = f"figures/p{page:03d}-fig{figures:02d}.png"
+                value.save(os.path.join(folder, relative))
+                lines.append(f"![figure]({relative})")
+        with open(page_file, "w") as fh:
+            fh.write(f"# page {page}\n\n" + "\n\n".join(lines) + "\n")
         if log:
-            log(f"    page {page}: {len(pages[page])} chars")
-        if cache_path:
-            with open(cache_path, "w") as fh:
-                json.dump(pages, fh)
-    return {page: pages[page] for page in range(1, last + 1) if page in pages}
+            log(f"    page {page}: {sum(len(l) for l in lines)} chars, "
+                f"{figures} figure(s)")
+
+    with open(os.path.join(folder, "document.json"), "w") as fh:
+        json.dump({"source": os.path.basename(path),
+                   "pages": last,
+                   "read_with": OCR_MODEL if needs_ocr else "the PDF's own text"},
+                  fh, indent=1)
+    return folder
 
 
-def assemble(doc, transcript=None, max_pages=None, figures=True):
-    """A document as (text, figures). No model calls: everything is in hand.
+def load_pages(folder, pages=None):
+    """A processed folder back as (text, figures), ready to send to a model.
 
-    transcript is the output of transcribe() for a scan, or None to use the
-    text and the figure objects the PDF carries itself.
+    pages is None for all of them, or a range or list of page numbers.
+
+    Ollama attaches images to a message rather than placing them in the text,
+    so each figure link becomes a numbered marker where it stood, and the
+    figures come back in that same order. The model cannot see the picture in
+    position, but it can see where the picture was.
     """
-    last = doc.page_count if max_pages is None else min(max_pages, doc.page_count)
-    chunks, found = [], []
-    for page in range(1, last + 1):
-        if transcript is None:
-            chunks.append(f"--- page {page} ---\n{page_text(doc, page)}")
-            if figures:
-                found += figures_from_objects(doc, page)
-        else:
-            text = transcript.get(page, "")
-            chunks.append(f"--- page {page} ---\n{text}")
-            if figures:
-                # We already paid for the OCR, so reuse it to place the figures.
-                found += [crop_region(doc, page, box) for box in figure_boxes(text)]
-    return "\n\n".join(chunks), found
+    wanted = None if pages is None else {int(p) for p in pages}
+    chunks, figures = [], []
+
+    for page_file in sorted(glob.glob(os.path.join(folder, "page-*.md"))):
+        page = int(os.path.basename(page_file)[5:8])
+        if wanted is not None and page not in wanted:
+            continue
+        with open(page_file) as fh:
+            text = fh.read()
+
+        def mark(match):
+            figures.append(Image.open(os.path.join(folder, match.group(1))))
+            return f"[figure {len(figures)} appears here]"
+
+        chunks.append(FIGURE_LINK.sub(mark, text))
+    return "\n\n".join(chunks), figures
 
 
 def record_key(schema):
@@ -457,42 +553,41 @@ def ask(text, figures, prompt, schema, model=CHAT_MODEL, client=None,
 
 
 def extract_document(path, prompt, schema, model=CHAT_MODEL, client=None,
-                     needs_ocr=None, figures=True, max_pages=None,
-                     max_chars=MAX_CHARS, max_figures=MAX_FIGURES,
-                     num_ctx=NUM_CTX, cache_path=None, log=None):
-    """One PDF in, a list of records out.
+                     needs_ocr=None, out_dir="processed", pages=None,
+                     max_pages=None, max_chars=MAX_CHARS,
+                     max_figures=MAX_FIGURES, num_ctx=NUM_CTX, log=None):
+    """One PDF in, a list of records out, by way of a folder you can inspect.
 
     needs_ocr is None to let the model decide, or True/False when you already
-    know — which, for your own material, you usually do.
+    know -- which, for your own material, you usually do.
     """
-    doc = open_pdf(path)
-
     if needs_ocr is None:
-        verdict = choose_strategy(doc, model=model, client=client, log=log)
+        verdict = choose_strategy(open_pdf(path), model=model, client=client,
+                                  log=log)
         needs_ocr = verdict["needs_ocr"]
         if log:
             route = f"re-reading every page with {OCR_MODEL}" if needs_ocr \
                     else "using the text stored in the PDF"
             log(f"    {route} — {verdict['reason']}")
 
-    transcript = None
     if needs_ocr:
         unload(model, client)                 # make room for the OCR model
         require_models(OCR_MODEL)
-        transcript = transcribe(doc, max_pages=max_pages,
-                                cache_path=cache_path, log=log)
+    folder = process_pdf(path, out_dir=out_dir, needs_ocr=needs_ocr,
+                         max_pages=max_pages, log=log)
+    if needs_ocr:
         unload(OCR_MODEL, client)             # and give the GPU back
 
-    text, found = assemble(doc, transcript, max_pages=max_pages, figures=figures)
-    return ask(text, found, prompt, schema, model=model, client=client,
+    text, figures = load_pages(folder, pages=pages)
+    return ask(text, figures, prompt, schema, model=model, client=client,
                max_chars=max_chars, max_figures=max_figures, num_ctx=num_ctx,
                log=log)
 
 
 def extract_folder(folder, prompt, schema, model=CHAT_MODEL, client=None,
-                   needs_ocr=None, figures=True, max_pages=None,
-                   max_chars=MAX_CHARS, max_figures=MAX_FIGURES,
-                   num_ctx=NUM_CTX, cache_dir=None, progress=True):
+                   needs_ocr=None, out_dir="processed", pages=None,
+                   max_pages=None, max_chars=MAX_CHARS,
+                   max_figures=MAX_FIGURES, num_ctx=NUM_CTX, progress=True):
     """Every PDF in a folder, as one table.
 
     folder  -- a directory holding .pdf files
@@ -503,48 +598,26 @@ def extract_folder(folder, prompt, schema, model=CHAT_MODEL, client=None,
     which file it came from. A document that fails is reported and skipped, so
     one bad PDF does not cost you the rest of the run.
 
-    The work runs in three passes -- judge every document, transcribe every
-    document that needs it, then extract from all of them -- so each model is
-    loaded once for the whole folder instead of once per document. Two models
-    this size will not sit on a 16 GB GPU together.
+    Every PDF is written to out_dir first, as a folder of markdown pages with
+    the figures linked where they appeared -- go and read them, that is what
+    the model is given. Pages already there are not redone, so an interrupted
+    run resumes and a page you delete is the only one re-read.
 
-    For a long run, pass cache_dir="somewhere": transcribed pages are written
-    as they are read and finished records as they are extracted, both read back
-    instead of being redone. Delete the folder when you change prompt or schema.
+    The work runs in three passes -- judge every document, process every
+    document, extract from all of them -- so each model is loaded once for the
+    whole folder. Two models this size will not sit on a 16 GB GPU together.
     """
     log = (lambda msg: print(msg, flush=True)) if progress else None
     paths = sorted(glob.glob(os.path.join(folder, "*.pdf")))
     if not paths:
         raise FileNotFoundError(f"no PDFs in {folder!r}")
     require_models(model)
-    if cache_dir:
-        os.makedirs(cache_dir, exist_ok=True)
-
-    def cache_file(path, suffix):
-        return (os.path.join(cache_dir, os.path.basename(path) + suffix)
-                if cache_dir else None)
-
-    # Anything already extracted needs none of the three passes.
-    records = {}
-    pending = []
-    for path in paths:
-        done = cache_file(path, ".records.json")
-        if done and os.path.exists(done):
-            with open(done) as fh:
-                records[path] = json.load(fh)
-            if log:
-                log(f"{os.path.basename(path)}: {len(records[path])} record(s) "
-                    f"from an earlier run")
-        else:
-            pending.append(path)
-
-    docs = {path: open_pdf(path) for path in pending}
 
     # Pass 1 -- how should each document be read? The chat model loads once.
-    plans = {}
-    if pending and log:
+    if log:
         log("deciding how to read each document")
-    for path in pending:
+    plans = {}
+    for path in paths:
         name = os.path.basename(path)
         if needs_ocr is not None:
             plans[path] = needs_ocr
@@ -553,7 +626,8 @@ def extract_folder(folder, prompt, schema, model=CHAT_MODEL, client=None,
                     f"{'re-read the pages' if needs_ocr else 'use the stored text'}")
             continue
         try:
-            verdict = choose_strategy(docs[path], model=model, client=client, log=log)
+            verdict = choose_strategy(open_pdf(path), model=model, client=client,
+                                      log=log)
         except Exception as exc:
             if log:
                 log(f"  {name}: FAILED -- {exc}")
@@ -565,57 +639,50 @@ def extract_folder(folder, prompt, schema, model=CHAT_MODEL, client=None,
                     else "using the stored text"
             log(f"  {name}: {route} — {verdict['reason']}")
 
-    # Pass 2 -- all the transcription together. The OCR model loads once.
-    transcripts = {}
-    if any(plans.get(p) for p in pending):
+    # Pass 2 -- write every document out. The OCR model loads once, if at all.
+    scanned = [p for p in paths if plans.get(p)]
+    if scanned:
         unload(model, client)
         require_models(OCR_MODEL)
-        for path in pending:
-            if not plans.get(path):
-                continue
-            name = os.path.basename(path)
-            if log:
-                log(f"re-reading {name} with {OCR_MODEL}")
-            try:
-                transcripts[path] = transcribe(
-                    docs[path], max_pages=max_pages,
-                    cache_path=cache_file(path, ".ocr.json"), log=log)
-            except Exception as exc:
-                if log:
-                    log(f"    FAILED -- {exc}")
-                plans[path] = None
-        unload(OCR_MODEL, client)
-
-    # Pass 3 -- extraction. The chat model loads once more.
-    for path in pending:
+    folders = {}
+    for path in paths:
         if plans.get(path) is None:
             continue
         name = os.path.basename(path)
         if log:
-            log(f"extracting from {name}")
-        text, found = assemble(docs[path], transcripts.get(path),
-                               max_pages=max_pages, figures=figures)
+            log(f"processing {name}")
         try:
-            got = ask(text, found, prompt, schema, model=model, client=client,
-                      max_chars=max_chars, max_figures=max_figures,
-                      num_ctx=num_ctx, log=log)
+            folders[path] = process_pdf(path, out_dir=out_dir,
+                                        needs_ocr=plans[path],
+                                        max_pages=max_pages, log=log)
+        except Exception as exc:
+            if log:
+                log(f"    FAILED -- {exc}")
+    if scanned:
+        unload(OCR_MODEL, client)
+
+    # Pass 3 -- extraction. The chat model loads once more.
+    frames = []
+    for path in paths:
+        if path not in folders:
+            continue
+        name = os.path.basename(path)
+        if log:
+            log(f"extracting from {name}")
+        text, figures = load_pages(folders[path], pages=pages)
+        try:
+            records = ask(text, figures, prompt, schema, model=model,
+                          client=client, max_chars=max_chars,
+                          max_figures=max_figures, num_ctx=num_ctx, log=log)
         except Exception as exc:
             if log:
                 log(f"    FAILED -- {exc}")
             continue
-        records[path] = got
         if log:
-            log(f"    {len(got)} record(s)")
-        done = cache_file(path, ".records.json")
-        if done:
-            with open(done, "w") as fh:
-                json.dump(got, fh, indent=1)
-
-    frames = []
-    for path in paths:
-        got = records.get(path)
-        if got:
-            frame = pd.DataFrame(got)
-            frame.insert(0, "source", os.path.basename(path))
+            log(f"    {len(records)} record(s)")
+        if records:
+            frame = pd.DataFrame(records)
+            frame.insert(0, "source", name)
             frames.append(frame)
+
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
