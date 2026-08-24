@@ -180,6 +180,7 @@ import os, subprocess, sys
 
 IN_COLAB = "google.colab" in sys.modules
 REPO = "2026_UIUC_workshop_llm_pdf_extraction"
+BRANCH = "main"   # switch to your working branch to test unmerged changes
 
 if IN_COLAB:
     # zstd unpacks Ollama's installer; pciutils lets it find the GPU.
@@ -188,7 +189,7 @@ if IN_COLAB:
     !pip -q install ollama pymupdf pandas pillow
     if os.path.basename(os.getcwd()) != REPO:   # so this cell is safe to re-run
         if not os.path.isdir(REPO):
-            !git clone -q https://github.com/de-Medeiros-insect-lab/{REPO}.git
+            !git clone -q --branch {BRANCH} https://github.com/de-Medeiros-insect-lab/{REPO}.git
         os.chdir(REPO)
     subprocess.Popen(["ollama", "serve"],
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
