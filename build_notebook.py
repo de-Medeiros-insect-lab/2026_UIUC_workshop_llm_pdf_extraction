@@ -1,6 +1,23 @@
 """Generate workshop.ipynb: five sessions, self-contained, no imports from a
-local module. Run:  python build_notebook.py"""
+local module.
+
+    python build_notebook.py            # write the notebook
+    python build_notebook.py --check    # say whether it is already up to date
+
+This script and the notebook carry the same content, so only one of them can be
+the copy you edit.
+
+Editing here is safe: cells whose source has not changed keep the outputs they
+already had, so a rebuild does not wipe the results of a run. Editing in Colab
+instead means a rebuild would revert your work -- so after a Colab session, run
+--check before you run anything else.
+"""
+import hashlib
 import json
+import os
+import sys
+
+NOTEBOOK = "workshop.ipynb"
 
 cells = []
 
@@ -15,38 +32,47 @@ def code(text):
                   "outputs": [], "source": text.strip("\n").splitlines(keepends=True)})
 
 
-# ════════════════════════════════════════════════════════════ TITLE
+md("""
+<a href="https://colab.research.google.com/github/de-Medeiros-insect-lab/2026_UIUC_workshop_llm_pdf_extraction/blob/manual_changes/workshop.ipynb" target="_parent"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/></a>
+""")
+
+# ══════════════════ EXTRACTING STRUCTURED DATA FROM PDFS WITH OPEN MODELS
 md("""
 # Extracting structured data from PDFs with open models
 
-Five sessions. Everything runs free on Colab, on models you could also run on
-your own machine.
+In this workshop, we will learn how to interact programmatically with large language models (LLMs) and then apply this to the task of extracting structured data from PDFs.
+
+Everything here runs free on Google Colab using a GPU with 16GB of RAM, which is enough for low-end LLMs. If you have this memory on your machine, you can run locally too by downloading this as a python notebook. You can run python notebooks using [Jupyter](https://jupyter.org/), among other software.
+
+We will go through 5 steps:
 
 1. **Setup** — talking to a language model from Python
 2. **Preparing documents** — OCR and figure extraction
-3. **Structured extraction** — getting tables out of prose
-4. **An agent** — letting the model choose its own approach
-5. **Scaling up** — a bigger model, and a whole folder of PDFs
+3. **Structured extraction** — getting tables out of unstructured text
+4. **An agent** — creating an AI agent that chooses the best approach
+5. **Scaling up** — a bigger model in the cloud, and a whole folder of PDFs
 
-**Set your runtime to a GPU before you start:** Runtime → Change runtime type → T4.
+
+
+**To get started, set your runtime to a GPU before you start:** Runtime → Change runtime type → T4.
 Then click *Connect*
 """)
 
-# ════════════════════════════════════════════════════════ SESSION 1
+# ══════════════════════════════════════════════════════════════ SESSION 1
 md("""
 ---
 # Session 1 — Setup, and talking to a model
 
 ## 1.1 - Interacting with Ollama through the desktop app
 
-You were asked to install the [Ollama Desktop app](https://ollama.com/) before the workshop. Let's first interact with it locally on your computer, and later we will do the same programatically through this python notebook.
+We asked you to install the [Ollama Desktop app](https://ollama.com/) before the workshop. Let's first interact with it locally on your computer, and later we will do the same programmatically through this python notebook.
 
-Ollama is one of the programs that you can use to deploy large language models with open weights. These are [open-source models](https://en.wikipedia.org/wiki/Open-source_artificial_intelligence) that you can run for free on your own device, or rent cloud computing to run. These include the models trained by Chinese companies and highly talked about in the media, but some US-based companies also release open source models (openAI has [a few, now a bit outdated](https://ollama.com/library/gpt-oss), and meta [just released a new one](https://ollama.com/library/muse-glimmer)).
+Ollama is one of the programs that you can use to deploy large language models with open weights. These are [open-source models](https://en.wikipedia.org/wiki/Open-source_artificial_intelligence) that you can run for free on your own device, or rent cloud computing to run. These include the models trained by Chinese companies and highly talked about in the media, but some US-based companies also release open source models (OpenAI has [a few, now a bit outdated](https://ollama.com/library/gpt-oss), and meta [just released a new one](https://ollama.com/library/muse-glimmer)).
 
-You do not need Ollama to run open models, but Ollama offers a convenient engine that automatically figures out the best way to deploy a model on your hardware. For pure python, you can check the [Transformers library and models hosted by Huggingface](https://huggingface.co/docs/transformers/en/index). We will have Ollama running as a server in the background in this workshop and use python to communicate with it, for convenience. As you learn more about using LLMs, you can explore the Transformers library, [vLLM](https://vllm.ai/), [unsloth](https://unsloth.ai/) and other ways to do it.
+You do not need Ollama to run open models, but Ollama offers a convenient engine that automatically figures out the best way to deploy a model on your hardware. For pure python, you can check the [Transformers library and models hosted by Huggingface](https://huggingface.co/docs/transformers/en/index). We will have Ollama running as a server in the background in this workshop and use python to communicate with this server. As you learn more about using LLMs, you can explore the Transformers library, [vLLM](https://vllm.ai/), [unsloth](https://unsloth.ai/) and other ways to do this.
 
 Let's start opening Ollama on your own computer. Click on *New chat*, choose the model *deepseek-r1:1.5b*, and start chatting. The interface should be familiar to you, similar to other web-based chatbots.
-* We are using *deepseek-r1:1.5b* because it is a very small model that can run on pretty much any of your computers, whether or not you have a powerfull GPU. Let's start with this one so everyone is on the same page.
+* We are using *deepseek-r1:1.5b* because it is a very small model that can run on pretty much any of your computers, whether or not you have a powerful GPU. Let's start with this one so everyone is on the same page.
 * **DO NOT USE A CLOUD MODEL YET**
 """)
 
@@ -62,115 +88,90 @@ curl http://localhost:11434/v1/chat/completions -H "Content-Type: application/js
 """)
 
 md("""
-### What came back
+### What you will see back
 
-One long line of JSON. Here it is laid out. The numbered markers are the parts
-worth knowing.
+You will get a very long line in [JSON format](https://en.wikipedia.org/wiki/JSON). Here I am showing results that I got when preparing the workshop, broken over several lines, with some parts numbered for us to discuss them:
 
-<div style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;line-height:1.7;background:#f6f8fa;color:#24292f;padding:16px 18px;border:1px solid #d0d7de;border-radius:8px;overflow-x:auto">
-{<br>
-&nbsp;&nbsp;<span style="color:#0550ae">"id"</span>: <span style="color:#0a3069">"chatcmpl-364"</span>,<br>
-&nbsp;&nbsp;<span style="color:#0550ae">"object"</span>: <span style="color:#0a3069">"chat.completion"</span>,<br>
-&nbsp;&nbsp;<span style="color:#0550ae">"created"</span>: <span style="color:#0550ae">1786808743</span>,<br>
-&nbsp;&nbsp;<span style="color:#0550ae">"model"</span>: <span style="color:#0a3069">"deepseek-r1:1.5b"</span>&nbsp;&nbsp;<span style="background:#ddf4ff;border-radius:10px;padding:1px 7px;color:#0550ae;font-weight:600">1</span><br>
-&nbsp;&nbsp;<span style="color:#0550ae">"choices"</span>: [<br>
-&nbsp;&nbsp;&nbsp;&nbsp;{<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#0550ae">"index"</span>: <span style="color:#0550ae">0</span>,<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#0550ae">"message"</span>: {<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#0550ae">"role"</span>: <span style="color:#0a3069">"assistant"</span>,&nbsp;&nbsp;<span style="background:#ddf4ff;border-radius:10px;padding:1px 7px;color:#0550ae;font-weight:600">2</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#0550ae">"content"</span>: &hellip;&nbsp;&nbsp;<span style="background:#dafbe1;border-radius:10px;padding:1px 7px;color:#116329;font-weight:600">3</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#0550ae">"reasoning"</span>: &hellip;&nbsp;&nbsp;<span style="background:#fff1e5;border-radius:10px;padding:1px 7px;color:#953800;font-weight:600">4</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;},<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#0550ae">"finish_reason"</span>: <span style="color:#0a3069">"stop"</span>&nbsp;&nbsp;<span style="background:#ffe9e9;border-radius:10px;padding:1px 7px;color:#a40e26;font-weight:600">5</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;}<br>
-&nbsp;&nbsp;],<br>
-&nbsp;&nbsp;<span style="color:#0550ae">"usage"</span>: { <span style="color:#0550ae">"prompt_tokens"</span>: <span style="color:#0550ae">16</span>, <span style="color:#0550ae">"completion_tokens"</span>: <span style="color:#0550ae">638</span>, <span style="color:#0550ae">"total_tokens"</span>: <span style="color:#0550ae">654</span> }&nbsp;&nbsp;<span style="background:#f3e8ff;border-radius:10px;padding:1px 7px;color:#6639ba;font-weight:600">6</span><br>
+```json
+{
+  "id": "chatcmpl-364",
+  "object": "chat.completion",
+  "created": 1786808743,
+  "model": "deepseek-r1:1.5b",                 // 1️⃣
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",                   // 2️⃣
+        "content": "Ants are the best ...",    // 3️⃣
+        "reasoning": "Alright, so I need ..."  // 4️⃣
+      },
+      "finish_reason": "stop"                  // 5️⃣
+    }
+  ],
+  "usage": { "prompt_tokens": 16, "completion_tokens": 638, "total_tokens": 654 }   // 6️⃣
 }
-</div>
+```
 
-<table style="font-size:14px;border-collapse:collapse;margin-top:12px">
-<tr><td style="padding:5px 12px 5px 0;vertical-align:top"><span style="background:#ddf4ff;border-radius:10px;padding:1px 7px;color:#0550ae;font-weight:600">1</span></td>
-<td style="padding:5px 0"><code>model</code> — which model answered. Worth recording: results are not comparable across models.</td></tr>
-<tr><td style="padding:5px 12px 5px 0;vertical-align:top"><span style="background:#ddf4ff;border-radius:10px;padding:1px 7px;color:#0550ae;font-weight:600">2</span></td>
-<td style="padding:5px 0"><code>role</code> — always <code>assistant</code> for a reply. You send <code>user</code> and <code>system</code>; it sends back <code>assistant</code>.</td></tr>
-<tr><td style="padding:5px 12px 5px 0;vertical-align:top"><span style="background:#dafbe1;border-radius:10px;padding:1px 7px;color:#116329;font-weight:600">3</span></td>
-<td style="padding:5px 0"><code>content</code> — <b>the answer</b>. The only part a chat window shows you.</td></tr>
-<tr><td style="padding:5px 12px 5px 0;vertical-align:top"><span style="background:#fff1e5;border-radius:10px;padding:1px 7px;color:#953800;font-weight:600">4</span></td>
-<td style="padding:5px 0"><code>reasoning</code> — the model thinking out loud first, kept separate. Only reasoning models return this.</td></tr>
-<tr><td style="padding:5px 12px 5px 0;vertical-align:top"><span style="background:#ffe9e9;border-radius:10px;padding:1px 7px;color:#a40e26;font-weight:600">5</span></td>
-<td style="padding:5px 0"><code>finish_reason</code> — <code>stop</code> means it finished. <code>length</code> means it hit a limit mid-sentence and your answer is cut off. Always check this.</td></tr>
-<tr><td style="padding:5px 12px 5px 0;vertical-align:top"><span style="background:#f3e8ff;border-radius:10px;padding:1px 7px;color:#6639ba;font-weight:600">6</span></td>
-<td style="padding:5px 0"><code>usage</code> — tokens in, tokens out. Roughly words. What you are charged for on paid services, and what fills the model's limited memory.</td></tr>
-</table>
+(The `//` lines are our annotations — real JSON has no comments.)
+
+| | field | what it is |
+| :-- | :-- | :-- |
+| 1️⃣ | `model` | the name of the model used. |
+| 2️⃣ | `role` | `assistant`, `user` or `system`; in this case, a response, so `assistant`. |
+| 3️⃣ | `content` | **the answer**. The only part a chat window shows you. |
+| 4️⃣ | `reasoning` | the model thinking out loud first, kept separate. Only reasoning models return this. |
+| 5️⃣ | `finish_reason` | `stop` means it finished. `length` means it hit a limit mid-sentence and your answer is cut off. Always check this. |
+| 6️⃣ | `usage` | Number of tokens used, important for cost and model context. |
 """)
 
 md("""
-### <span style="background:#dafbe1;border-radius:10px;padding:1px 7px;color:#116329;font-weight:600">3</span> &nbsp;The answer
+### 3️⃣ &nbsp;The answer
 
-<div style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;line-height:1.65;background:#f0fff4;color:#24292f;padding:14px 16px;border-left:4px solid #2da44e;border-radius:6px">
-Ants are the best because they excel in pollination, carrying and spreading
-pollens throughout most of their lifetime in their home regions. This makes
-them highly effective in ensuring plant reproduction.
-</div>
-
-Twenty-eight words, out of 638 the model generated. Everything else was
-thinking.
+> Ants are the best because they excel in pollination, carrying and spreading
+> pollens throughout most of their lifetime in their home regions. This makes
+> them highly effective in ensuring plant reproduction.
 """)
 
 md("""
-### <span style="background:#fff1e5;border-radius:10px;padding:1px 7px;color:#953800;font-weight:600">4</span> &nbsp;The reasoning
+### 4️⃣ &nbsp;The reasoning
 
-<div style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:1.6;background:#fffaf5;color:#24292f;padding:14px 16px;border-left:4px solid #fb8500;border-radius:6px;max-height:300px;overflow-y:auto;white-space:pre-wrap">Alright, so I need to figure out which insect is the best. I guess the user is asking for the most effective or the best known insect. Let me start by thinking about insects in general—there are over 30, each with different roles and uses, from ants to moles.
+> Alright, so I need to figure out which insect is the best. I guess the user is asking for the most effective or the best known insect. Let me start by thinking about insects in general—there are over 30, each with different roles and uses, from ants to moles.
+>
+> I remember that ants are generally noted for their work in pollination. They carry fruit all year around and are crucial for pollination in their native regions. Moles, on the other hand, I think are good at defense and scaring off neighbors, which probably helps them survive. They can be aggressive and make aggressive behavior.
+>
+> Wait, but if I'm comparing ants and moles, which one is better in what ways? The user said to choose one only, but that's confusing because they're two different insects with distinct roles. Maybe the user is asking which kind is the best or perhaps comparing based on specific aspects.
+>
+> Let me think about size. Moles are generally smaller than ants, so ants are larger. But ants are more effective in certain ways. Maybe I should consider their reproductive success in pollination, which ants do more than moles. Also, ants might be more aggressive, so if the user values that, perhaps ants are better.
+>
+> Another angle is their behavior. Moles are known for being aggressive, which can be advantageous in some environments. However, they might not handle certain tasks as efficiently as ants. On the flip side, if the focus is on defense, moles might be better, but their reputation as scaring off neighbors is something ants don't have.
+>
+> I'm a bit torn because there's no universal "best." The answer will depend on the criteria. If it's based on ability to pollinate, ants are better. If it's based on defense, moles might be better. But since the user is asking for an insect, not a group, perhaps they want a single answer. Maybe the ants are superior at pollination.
+>
+> Alternatively, maybe the question is about the best insect for garden use, considering factors like defense, size, and functionality. In that case, moles could be better for defense but less effective in pollination. But if considering a mix, like defense and pollination, maybe it's a balance.
+>
+> I'm also thinking about the user's perspective. They might be looking for an insect that's efficient in their specific niche, like for pollination, or maybe in defense. Without knowing exactly, it's a bit unclear. But I'll conclude that while there might not be a single best insect, between the two, considering pollination, ants are superior. So I'll say ants are the best because they excel in pollination and are effective.
+>
+> Wait, but the user might be looking for something else, like functional traits or specific environmental roles. So perhaps the answer could vary based on the criteria. But sticking with pollination seems solid, so ants are my choice for that.
 
-I remember that ants are generally noted for their work in pollination. They carry fruit all year around and are crucial for pollination in their native regions. Moles, on the other hand, I think are good at defense and scaring off neighbors, which probably helps them survive. They can be aggressive and make aggressive behavior.
+## Three things to take from this response:
 
-Wait, but if I'm comparing ants and moles, which one is better in what ways? The user said to choose one only, but that's confusing because they're two different insects with distinct roles. Maybe the user is asking which kind is the best or perhaps comparing based on specific aspects.
-
-Let me think about size. Moles are generally smaller than ants, so ants are larger. But ants are more effective in certain ways. Maybe I should consider their reproductive success in pollination, which ants do more than moles. Also, ants might be more aggressive, so if the user values that, perhaps ants are better.
-
-Another angle is their behavior. Moles are known for being aggressive, which can be advantageous in some environments. However, they might not handle certain tasks as efficiently as ants. On the flip side, if the focus is on defense, moles might be better, but their reputation as scaring off neighbors is something ants don't have.
-
-I'm a bit torn because there's no universal "best." The answer will depend on the criteria. If it's based on ability to pollinate, ants are better. If it's based on defense, moles might be better. But since the user is asking for an insect, not a group, perhaps they want a single answer. Maybe the ants are superior at pollination.
-
-Alternatively, maybe the question is about the best insect for garden use, considering factors like defense, size, and functionality. In that case, moles could be better for defense but less effective in pollination. But if considering a mix, like defense and pollination, maybe it's a balance.
-
-I'm also thinking about the user's perspective. They might be looking for an insect that's efficient in their specific niche, like for pollination, or maybe in defense. Without knowing exactly, it's a bit unclear. But I'll conclude that while there might not be a single best insect, between the two, considering pollination, ants are superior. So I'll say ants are the best because they excel in pollination and are effective.
-
-Wait, but the user might be looking for something else, like functional traits or specific environmental roles. So perhaps the answer could vary based on the criteria. But sticking with pollination seems solid, so ants are my choice for that.</div>
-
-**Read it as an entomologist.** This is a small model, and it shows:
-
-- *"there are over 30"* — thirty what?
-- *"from ants to moles"*, and then five paragraphs comparing them — **moles are mammals**
-- *"They carry fruit all year around"*
-- and the conclusion it commits to: **ants excel at pollination**
-
-The reasoning is not a proof. It is more text, generated the same way as the
-answer, and it can be fluent and wrong from start to finish. It is useful for
-seeing *how* an answer was reached — not for trusting that it was reached
-correctly.
-
-Two things to take from this response:
-
-- A chat window shows you <span style="background:#dafbe1;border-radius:9px;padding:0 6px;color:#116329;font-weight:600">3</span> only. Working
-  programmatically you get all of it, and
-  <span style="background:#ffe9e9;border-radius:9px;padding:0 6px;color:#a40e26;font-weight:600">5</span> and
-  <span style="background:#f3e8ff;border-radius:9px;padding:0 6px;color:#6639ba;font-weight:600">6</span> are the two that
-  cause trouble at scale — silently truncated answers, and a context window you
-  did not know you were filling.
-- 638 tokens spent to produce 28 words of answer. Reasoning is not free.
+- A chat window shows you the response 3️⃣ only. Working
+  programmatically you get a lot more information, including all reasoning and lots of metadata.
+- Reasoning is necessary for some tasks, but it is expensive.
+- Reasoning has limits: small models may still hallucinate.
 """)
 
 md("""
 ## 1.3 - Interacting with Ollama through a cloud Python notebook
 
-From now on, we will be running Ollama, but not on your own computer. This colab notebook runs on a cloud instance on a Google server. The free tier is limited to GPUs with 16 GB of memory (so this is the maximum model size + data we can use). We will install Ollama on the server, download models and interact with them.
+From now on, we will still be running Ollama, but not on your own computer. This colab notebook runs on a cloud instance on a Google server. The free tier is limited to GPUs with 16 GB of memory (so this is the maximum model size + data we can use). We will install Ollama on the server, download models and interact with them.
 
 **What we're doing:** installing Ollama, downloading a language model, and
 sending it our first messages from Python.
 
 **Why:** everything later in the day is this same call with more structure
-around it. Get comfortable with it now, while the parts are still small.
+around it. We will get comfortable with it now, while the parts are still small.
 """)
 
 code("""
@@ -178,30 +179,29 @@ code("""
 import os, subprocess, sys
 
 IN_COLAB = "google.colab" in sys.modules
+REPO = "2026_UIUC_workshop_llm_pdf_extraction"
 
 if IN_COLAB:
     # zstd unpacks Ollama's installer; pciutils lets it find the GPU.
     !DEBIAN_FRONTEND=noninteractive apt-get -qq install -y zstd pciutils > /dev/null
     !curl -fsSL https://ollama.com/install.sh | sh
-    !pip -q install ollama pymupdf pandas openai pillow
-    !git clone -q https://github.com/de-Medeiros-insect-lab/2026_UIUC_workshop_llm_pdf_extraction.git
-    os.chdir("2026_UIUC_workshop_llm_pdf_extraction")
+    !pip -q install ollama pymupdf pandas pillow
+    if os.path.basename(os.getcwd()) != REPO:   # so this cell is safe to re-run
+        if not os.path.isdir(REPO):
+            !git clone -q https://github.com/de-Medeiros-insect-lab/{REPO}.git
+        os.chdir(REPO)
     subprocess.Popen(["ollama", "serve"],
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 import time, base64, json, glob, re
 import ollama, pymupdf, pandas as pd
 from PIL import Image
+from IPython.display import display, Image as ShowImage
 import io
-
-CHAT_MODEL = "qwen3.5:9b"      # reads and reasons
-OCR_MODEL  = "deepseek-ocr"    # transcribes page images
 """)
 
 md("""
-The server starts in the background, so our first request can arrive before
-it is listening. A short polling loop is more pleasant than a crash — and
-we will reuse it every time we restart.
+The code below just checks whether the server is ready so we do not get an error when using it.
 """)
 
 code("""
@@ -223,8 +223,7 @@ print("Ollama is up")
 md("""
 ### Check you actually have a GPU
 
-Two separate questions: does this machine have a GPU, and is Ollama using it?
-A model can quietly land on the CPU and simply be very slow.
+Models can run on a CPU, but then they get very slow. So let's check whether you have a GPU.
 """)
 
 code("""
@@ -236,20 +235,30 @@ def gpu_report():
         print("GPU:", smi.stdout.strip() if smi.returncode == 0 else "none")
     except FileNotFoundError:
         print("GPU: none")
-    ps = subprocess.run(["ollama", "ps"], capture_output=True, text=True)
-    rows = [r for r in ps.stdout.strip().splitlines()[1:] if r.strip()]
-    print("Ollama is running:", rows or "nothing loaded yet")
+    try:
+        ps = subprocess.run(["ollama", "ps"], capture_output=True, text=True)
+        rows = [r for r in ps.stdout.strip().splitlines()[1:] if r.strip()]
+        print("Ollama is running:", rows or "nothing loaded yet")
+    except FileNotFoundError:
+        print("Ollama is running: the ollama command was not found -- "
+              "did the setup cell above finish?")
 
 gpu_report()
 """)
 
 md("""
-No GPU? Pair up with a neighbour. There is no CPU path today — the models are
-too slow on one to follow along.
+If you do not have a GPU, **STOP** and ask the instructors. You may have forgotten to choose the T4 runtime type.
+
+Now we will download our chat model. For convenience, we will save our chat model value in a variable so we can reuse it. We will use the model [Qwen 3.5](https://qwen.ai/blog?id=qwen3.5) with 9 billion parameters, which takes ~6.5 GB of RAM. It is a quite powerful model for a small size, with capabilities of chatting, reasoning, using tools, and taking images as input. More powerful versions of Qwen have more parameters, but need more RAM.
+
+The terminal command to ask ollama to download a model is `ollama pull`. In a python
+notebook we can run a terminal command by starting the line with `!`, and paste the
+value of a python variable into it with `{}` — so `!ollama pull {CHAT_MODEL}` runs
+`ollama pull qwen3.5:9b`. The download is ~6.5 GB, so start it and keep reading.
 """)
 
 code("""
-# ~6.6 GB. Start it now.
+CHAT_MODEL = "qwen3.5:9b"
 !ollama pull {CHAT_MODEL}
 """)
 
@@ -257,7 +266,7 @@ md("""
 ### Your first message
 
 A conversation is a list of messages. Each has a `role` and `content`.
-`temperature=0` makes the model as repeatable as it can be.
+`temperature` sets how noisy a model will be. Higher temperature may make responses more creative because they are more variable. In our context, we typically want `temperature=0`, which makes the model as predictable and repeatable as it can be.
 """)
 
 code("""
@@ -274,11 +283,16 @@ md("""
 ### The system prompt
 
 A `system` message sets who the model is being. Language models are best
-understood as role-playing machines: say clearly what role you want, and you
-get noticeably better answers.
+understood as role-playing machines:
 
 > Shanahan, M., McDonell, K. & Reynolds, L. Role play with large language
 > models. *Nature* **623**, 493–498 (2023).
+
+Say clearly what role you want, and the model will follow. They know lots of roles from the training data!
+
+Let's try sending a message with a strict system constraint.
+
+Note that we are using `think=False`: the model will just answer directly without reasoning first.
 """)
 
 code("""
@@ -299,12 +313,11 @@ print(reply.message.content)
 md("""
 **Check that answer against what you know.**
 
-A 9B model is fluent about taxonomy and not reliable about it — it may well
-have just told you something confidently wrong. Fluency and accuracy are
-separate things.
+A 9B model is fluent about many things but not very reliable — it may well
+have just told you something confidently wrong.
 
-This is why the rest of the day extracts text *from documents* rather than
-asking the model what it knows.
+This is why we will extract text *from documents* rather than
+asking the model what it knows. Both using larger models and providing stronger contextualization will decrease the chances that the model will make stuff up.
 """)
 
 md("""
@@ -331,18 +344,22 @@ md("""
 ### Thinking
 
 This model can reason before answering. `think=True` returns that reasoning
-separately from the answer.
+separately from the answer. Let's try the same question as above:
 """)
 
 code("""
 reply = ollama.chat(
     model=CHAT_MODEL,
-    messages=[{"role": "user",
-               "content": "A beetle is 4.2 mm long and 1.4 mm wide. "
-                          "What is the length-to-width ratio?"}],
+    messages=[
+        {"role": "system",
+         "content": "You are an expert coleopterist. Answer in two sentences."},
+        {"role": "user",
+         "content": "What is a rostrum, and which beetles have one?"},
+    ],
     think=True,
     options={"temperature": 0},
 )
+
 print("--- reasoning ---\\n", reply.message.thinking)
 print("--- answer ---\\n", reply.message.content)
 """)
@@ -350,16 +367,14 @@ print("--- answer ---\\n", reply.message.content)
 md("""
 Reasoning is not always a win. On a task with nothing to reason about — copying
 text out of an image, say — it can ramble for pages and never answer. We use
-`think=False` for that. In Session 4 the setting reverses, and reasoning is the
-only thing that makes the job work.
+`think=False` for that. For more complicated tasks, it may help tremendously.
 
 **Recap.** You installed Ollama, pulled a model, and sent it messages. You set
-a role with a system prompt, saw the model state something false with complete
-confidence, and switched its reasoning on and off. Next: getting text out of
+a role with a system prompt, evaluated the model responses, and switched its reasoning on and off. Next: getting text out of
 real documents.
 """)
 
-# ════════════════════════════════════════════════════════ SESSION 2
+# ══════════════════════════════════════════════════════════════ SESSION 2
 md("""
 ---
 # Session 2 — Preparing documents
@@ -368,24 +383,37 @@ md("""
 model — one born-digital, one a 1929 scan.
 
 **Why:** a PDF is not a text file. What you can get out of it, and how much you
-can trust it, depends entirely on how it was made. Get this wrong and
-everything downstream is quietly wrong too.
+can trust it, depends entirely on how it was made.
+
+Very powerful models (e.g. Claude models) can read PDFs natively, but use a lot of tokens for it. If we prepare our PDFs beforehand as text and images, we can get high-quality responses with a much lower cost.
+
+It is very common for old scans to have used outdated OCR tools, so it is usually a good idea to re-run OCR. Here we will use Ollama to do OCR using a modern model.
+
+OCR models are highly specialized - they only do OCR and nothing else. So they are usually pretty good even being small. And models from Chinese companies tend to be very good in multiple languages. Here we will use [deepseek OCR](https://github.com/deepseek-ai/DeepSeek-OCR) as our OCR model. It is not the latest version, but it is already excellent and supported by Ollama.
 """)
 
 code("""
 # ~6.7 GB. Start it now, it downloads while we talk.
+OCR_MODEL  = "deepseek-ocr"    # transcribes page images
 !ollama pull {OCR_MODEL}
 """)
 
 md("""
-We wrap page access in small functions because we call them constantly for the
-rest of the day, and because page numbering is a trap worth handling once:
-these use **1-based** pages, like the numbers printed on paper, while the
-library underneath counts from 0.
+We will now define several small functions that we will call constantly throughout the day. We will not explain in detail how each one works, only their general goal. Feel free to use these functions in your own code, and get your favorite chatbot to explain them to you if you are curious!
+
+**open_pdf()**: opens a pdf file using the [pymupdf library](https://pymupdf.readthedocs.io/en/latest/)
+
+**get_page_text()**: gets a specific page from a loaded pdf.
+
+**render_page()**: encodes a pdf page in the format required by an LLM
+
+**DEFAULT_DPI**: the resolution we will be using. We are limiting to 100 dpi here so we limit the memory (and number of tokens, and computing time, etc). Probably sufficient for most text and figures.
+
+The two PDFs we will use are taxonomic publications, one born-digital and the other historical and digitized. You can find them in the [github repository](https://github.com/de-Medeiros-insect-lab/2026_UIUC_workshop_llm_pdf_extraction)
 """)
 
 code("""
-DEFAULT_DPI = 100   # enough to read fine print; higher is slower for no gain
+DEFAULT_DPI = 100   # enough to read fine print; higher is slower for little gain
 
 def open_pdf(path):
     return pymupdf.open(path)
@@ -423,10 +451,9 @@ print(repr(get_page_text(legacy, 5)[:180]))
 md("""
 The legacy text is not empty. It is not obviously broken either. Look closely:
 the family name reads `Cureulionidse`. The scanner's OCR ran years ago and got
-it wrong, and nothing in the file says so.
+it wrong, and nothing in the file makes this clear.
 
-That is the dangerous case. An empty page announces itself; a page of
-confident nonsense does not.
+That is a dangerous and common case. Better never trust the OCR that comes with a historical PDF.
 """)
 
 code("""
@@ -437,8 +464,7 @@ display(ShowImage(data=base64.b64decode(render_page(legacy, 5))))
 md("""
 ### Figures: two completely different jobs
 
-In a born-digital PDF, figures are **objects**. You pull them out exactly, for
-free.
+In a born-digital PDF, figures are **objects**. You pull them out exactly using code. Here we use functions from the pymupdf library:
 """)
 
 code("""
@@ -469,8 +495,41 @@ md("""
 ### OCR with layout
 
 `deepseek-ocr` transcribes a page image, and asked the right way it also
-reports *where* things are. Note this uses `ollama.generate`, not
-`ollama.chat` — the layout information only comes through `generate`.
+reports *where* things are.
+
+When using the ollama library, we need `ollama.generate`, not
+`ollama.chat` to get the layout in addition to the text.
+
+Because OCR models are very specialized, they need a very specific prompt. In the case of deepseek OCR, this is documented in their github page. To get the text from a page and its layout, we need the following prompt: `"<image>\\n<|grounding|>Convert the document to markdown."`
+
+Let's do that for one page of the historical PDF:
+""")
+
+code("""
+reply = ollama.generate(
+        model=OCR_MODEL,
+        prompt="<image>\\n<|grounding|>Convert the document to markdown.",
+        images=[render_page(legacy, 6, dpi=100)],
+        options={"temperature": 0, "num_predict": 4096},
+    )
+print(reply.response)
+""")
+
+md("""
+Now let's compare this with the original OCR for the same page:
+""")
+
+code("""
+print("text layer :", get_page_text(legacy, 6).replace(chr(10), " "))
+""")
+
+code("""
+from IPython.display import Image as ShowImage, display
+display(ShowImage(data=base64.b64decode(render_page(legacy, 6))))
+""")
+
+md("""
+Now that we know this works, we will define a function that will get the OCR for a given page. This will help us repeat it many times.
 """)
 
 code("""
@@ -487,25 +546,15 @@ def ocr_page(doc, page, dpi=DEFAULT_DPI):
         options={"temperature": 0, "num_predict": 4096},
     )
     return reply.response or ""
-
-out = ocr_page(legacy, 6)
-print(out[:600])
-""")
-
-md("""
-Compare the corrupt line from the text layer with what OCR reads off the image.
-""")
-
-code("""
-print("text layer :", get_page_text(legacy, 5)[:60].replace(chr(10), " "))
-print("OCR        :", ocr_page(legacy, 5)[:80].replace(chr(10), " "))
 """)
 
 md("""
 ### Cropping the figure
 
-The regions are just coordinates in the text. We parse them out and cut the
-image — a small function, because Session 5 does this over a whole folder.
+The regions are just coordinates in the text. We have to manually parse them out and cut the
+image.
+
+The functions below will open a page and cut figures that deepseek OCR identified. Again, we will not go over the details, feel free to reuse the code!
 """)
 
 code("""
@@ -524,12 +573,12 @@ def crop_region(doc, page, box, dpi=150, pad=0.01):
     return im.crop((int((x1/1000 - pad) * W), int((y1/1000 - pad) * H),
                     int((x2/1000 + pad) * W), int((y2/1000 + pad) * H)))
 
-for r in regions(out):
+for r in regions(reply.response):
     print(r)
 """)
 
 code("""
-figures = [r for r in regions(out) if r[0] in ("image", "image_caption")]
+figures = [r for r in regions(reply.response) if r[0] in ("image", "image_caption")]
 if figures:
     x1 = min(f[1] for f in figures); y1 = min(f[2] for f in figures)
     x2 = max(f[3] for f in figures); y2 = max(f[4] for f in figures)
@@ -539,26 +588,170 @@ if figures:
 """)
 
 md("""
+### One function for both kinds of PDF
+
+We have now done the job twice, by hand, in two completely different ways: for
+the born-digital paper we asked the PDF for its image objects, and for the scan
+we asked the OCR model where the figures were and cut them out ourselves.
+
+Let's wrap both up so we can point them at any page of any PDF. Again, do not
+worry about the details — the useful part is the last function, `page_figures()`,
+which tries the cheap route first and only calls the OCR model if the page turns
+out to have no figure objects in it.
+
+**`figure_boxes()`**: groups each `image` region the OCR model found with the `image_caption` that belongs to it.
+
+**`figures_from_ocr()`**: OCRs a page, then crops out every figure it reported. For scans.
+
+**`figures_from_objects()`**: pulls out the figures a born-digital PDF stores as objects. A scanned page holds exactly one image object — the photograph of the whole page — so we ignore anything covering most of the page, and anything tiny (journal logos, publisher marks).
+
+**`page_figures()`**: objects if there are any, OCR otherwise.
+
+**`show_figures()`**: displays them at a sane size.
+""")
+
+code("""
+MIN_FIGURE_AREA = 0.03   # smaller than this is a logo, not a figure
+MAX_FIGURE_AREA = 0.90   # bigger than this is the page scan itself
+
+def figure_boxes(ocr_text):
+    \"\"\"One box per figure, each grown to include its caption. Scaled 0-1000.\"\"\"
+    regs     = regions(ocr_text)
+    images   = [r for r in regs if r[0] == "image"]
+    captions = [r for r in regs if r[0] == "image_caption"]
+    boxes = []
+    for img in images:
+        group = [img] + [c for c in captions
+                         if c[1] < img[3] and c[3] > img[1]   # overlaps it sideways
+                         and abs(c[2] - img[4]) < 100]        # and sits just below
+        boxes.append(("figure",
+                      min(g[1] for g in group), min(g[2] for g in group),
+                      max(g[3] for g in group), max(g[4] for g in group)))
+    return boxes
+
+def figures_from_ocr(doc, page, dpi=150, pad=0.01):
+    \"\"\"Figures on a scanned page: the OCR model finds them, we cut them out.\"\"\"
+    return [crop_region(doc, page, box, dpi=dpi, pad=pad)
+            for box in figure_boxes(ocr_page(doc, page))]
+
+def figures_from_objects(doc, page):
+    \"\"\"Figures a born-digital PDF stores as objects, ready to pull out.\"\"\"
+    pg = doc[page - 1]
+    page_area = pg.rect.width * pg.rect.height
+    found = []
+    for xref, *_ in pg.get_images(full=True):
+        placed = pg.get_image_rects(xref)
+        share = max((r.width * r.height) / page_area for r in placed) if placed else 0
+        if not MIN_FIGURE_AREA <= share <= MAX_FIGURE_AREA:
+            continue
+        pix = pymupdf.Pixmap(doc, xref)
+        if pix.colorspace is None:      # a stencil mask, not a picture
+            continue
+        found.append(Image.open(io.BytesIO(pix.tobytes("png"))))
+    return found
+
+def page_figures(doc, page, dpi=150):
+    \"\"\"Every figure on a page, whichever kind of PDF it came from.
+
+    Cheap route first: if the page has figure objects, we are done. Only if it
+    has none do we pay for an OCR call to go looking in the pixels.
+    \"\"\"
+    return figures_from_objects(doc, page) or figures_from_ocr(doc, page, dpi=dpi)
+
+def show_figures(figs, width=350):
+    \"\"\"Display figures small enough to fit in a notebook.\"\"\"
+    print(len(figs), "figure(s)")
+    for fig in figs:
+        small = fig.copy()
+        small.thumbnail((width, 4 * width))
+        display(small)
+""")
+
+md("""
+Let's check it against the two pages we just did by hand — page 3 of the modern
+paper (objects, instant) and page 6 of the scan (OCR, slower):
+""")
+
+code("""
+print("modern, page 3:")
+show_figures(page_figures(modern, 3))
+
+print("legacy, page 6:")      # no objects here, so this one calls the OCR model
+show_figures(page_figures(legacy, 6))
+""")
+
+md("""
+### Your turn — a PDF of your own
+
+Bring in a paper you actually care about and see what comes out of it.
+
+1. Click the **folder icon 📁** in the left sidebar, open the `example_pdfs`
+   folder, and drag your PDF into it. Wait for the upload to finish.
+2. In the cell below, put your file name in `MY_PDF` and the page you want in
+   `MY_PAGE`.
+3. Run it. You get the PDF's own text layer, a fresh OCR transcription of the
+   same page, and any figures on it.
+
+Things worth looking for:
+
+- Is there a text layer at all? A pure scan may give you nothing.
+- Where do the text layer and the fresh OCR disagree? Those disagreements are
+  where a silently wrong extraction would come from.
+- Did `page_figures()` find your figures? If your paper is born-digital and it
+  came back empty, the figure may be *drawn* in the PDF as vector art rather
+  than stored as an image object — there is no object to pull out, so treat that
+  page like a scan and pass `figures_from_ocr(doc, page)` instead.
+""")
+
+code("""
+MY_PDF  = "example_pdfs/CHANGE_THIS.pdf"   # your file, uploaded into example_pdfs/
+MY_PAGE = 1                                # the page you want to look at
+
+if not os.path.exists(MY_PDF):
+    print(f"{MY_PDF} not found. Files currently in example_pdfs/:")
+    for f in sorted(glob.glob("example_pdfs/*.pdf")):
+        print("   ", f)
+else:
+    mine = open_pdf(MY_PDF)
+    print(f"{MY_PDF}: {mine.page_count} pages\\n")
+
+    print("--- the PDF's own text layer ---")
+    print(get_page_text(mine, MY_PAGE)[:800] or "(empty — this page is a pure scan)")
+
+    print("\\n--- a fresh OCR transcription of the same page ---")
+    print(ocr_page(mine, MY_PAGE)[:800])
+
+    print("\\n--- figures ---")
+    show_figures(page_figures(mine, MY_PAGE))
+""")
+
+md("""
 **Recap.** Born-digital PDFs give you clean text and figures as objects. Scans
 give you pixels and, often, a text layer that is wrong without saying so. OCR
 recovers the text and tells you where each region sits, which is enough to cut
-figures out of a page that contains no figure objects.
+figures out of a page that contains no figure objects. `page_figures()` picks
+between the two for you.
 
 Next: turning this text into data.
 """)
 
-# ════════════════════════════════════════════════════════ SESSION 3
+# ══════════════════════════════════════════════════════════════ SESSION 3
 md("""
 ---
 # Session 3 — Structured extraction
 
-**What we're doing:** getting a table of species and traits out of prose.
+Now we know how to interact with Ollama with 2 kinds of models:
 
-**Why:** a paragraph is not data. To compare hundreds of descriptions you need
+- A multimodal model that can read text and pictures and give us a response.
+
+- A specialized OCR model that reads the image of a page and returns its layout and text.
+
+**What we're doing:**  Now we will take a pdf as input and use an LLM to extract structured data from it.
+
+**Why:** a paragraph is not data. To compare hundreds of morphological descriptions (or pollination papers, or anything you are interested in!), you need
 the same fields, with the same names, every time.
 
-**Start the cell below now** — it OCRs the whole 1929 paper and takes a few
-minutes. We will talk while it runs.
+We will start by using our OCR model to extract the text from our legacy paper. We will save this text to a file in JSON format, keeping the pagination:
 """)
 
 code("""
@@ -574,9 +767,9 @@ print("saved legacy_ocr.json")
 """)
 
 md("""
-### Asking for JSON is not enough
+### How to constrain the output
 
-The obvious approach: ask for JSON.
+Let's start by asking the model to constrain the output to a specific format. Because we like JSON, JSON it is. Let's try this on page 2 of our modern pdf. After finished, let's discuss the response. Did you get the same as I did?
 """)
 
 code("""
@@ -584,137 +777,289 @@ reply = ollama.chat(
     model=CHAT_MODEL,
     messages=[{"role": "user",
                "content": "List the species and their traits as JSON.\\n\\n"
-                          + get_page_text(modern, 2)[:1500]}],
+                          + get_page_text(modern, 2)}],
     format="json",
     think=False,
     options={"temperature": 0},
 )
-print(reply.message.content[:400])
+print(reply.message.content)
 """)
 
 md("""
-That is valid JSON, but the model chose the field names. Run it again and they
-may change. You cannot build a table on that.
-
 ### A schema
 
-A JSON schema is a dictionary describing the shape you want. Pass it as
-`format=` and the model cannot produce anything else.
+A better way to constrain the response is to use a SCHEMA.
+
+A [JSON schema](https://en.wikipedia.org/wiki/JSON#Metadata_and_schema) is a dictionary describing the shape you want. It includes which variables you want, what type they are, etc.
+
+Using ollama, we can pass schemas using
+`format=` and the model will constrain its response to the schema. Let's start with a simple schema that extracts the name, author, synonyms and minimum and maximum length of each species.
+
+The schema below only makes species name and author mandatory (it is possible the other data is missing). It tells the type to expect for each field (types can be *string*, *number*, *array* (an unnamed list of things, like a Python list) and *object* (a named list of things, like a Python dictionary)).
+
+We use `"additionalProperties": False` to prevent the model from adding additional traits.
 """)
 
 code("""
 SPECIES_SCHEMA = {
     "type": "object",
     "properties": {
-        "species": {
+        "name": {"type": "string"},
+        "author": {"type": "string"},
+        "min_length": {"type": "number"},
+        "max_length": {"type": "number"},
+        "synonyms": {
             "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "name":   {"type": "string"},
-                    "traits": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "anatomical_part": {"type": "string"},
-                                "trait":           {"type": "string"},
-                                "value":           {"type": "string"},
-                                "units":           {"type": "string"},
-                                "source_text":     {"type": "string"},
-                            },
-                            "required": ["anatomical_part", "trait", "value",
-                                         "source_text"],
-                        },
-                    },
-                },
-                "required": ["name", "traits"],
-            },
+            "items": {"type": "string"}
         }
     },
-    "required": ["species"],
+    "required": ["name", "author"],
+    "additionalProperties": False
 }
 """)
 
 md("""
-`source_text` is required on purpose: every extracted value should be traceable
-back to the sentence it came from.
-
-We wrap the call in a function because Session 5 runs it over a whole folder.
+Let's now try our prompt again but with this schema. For that, we just replace `format=json` with `format=SPECIES_SCHEMA`, the variable where we saved our schema.
 """)
 
 code("""
-EXTRACT_PROMPT = (
-    "Extract every species described in this text, with their morphological "
-    "traits. Copy the exact source sentence for each trait into source_text. "
-    "Do not invent traits that are not stated.\\n\\n"
+reply = ollama.chat(
+    model=CHAT_MODEL,
+    messages=[{"role": "user",
+               "content": "List the species and their traits as JSON. min_length and max_length are the minimum and maximum lengths mentioned for each species\\n\\n"
+                          + get_page_text(modern, 2)}],
+    format=SPECIES_SCHEMA,
+    think=False,
+    options={"temperature": 0},
+)
+print(reply.message.content)
+""")
+
+md("""
+We can now use the python library `json` to load this json-formatted object as a python object including strings, numbers, lists and dictionaries:
+""")
+
+code("""
+json_result = json.loads(reply.message.content)
+json_result
+""")
+
+md("""
+And we can easily transform JSON into tables using Python:
+""")
+
+code("""
+pd.DataFrame([json_result])
+""")
+
+md("""
+### The whole paper, figures included
+
+Now that we have done this for one page, let's do a whole paper. A real extraction takes the whole document, and
+a taxonomic paper keeps a lot of its data in the plates — so we send the figures
+too. `qwen3.5:9b` is multimodal, which means a message can carry images
+alongside its text.
+
+We need to change two things:
+
+**A whole paper has many species, so the schema has to say so.** `SPECIES_SCHEMA`
+describes *one* species. Now we need a larger schema that includes `SPECIES_SCHEMA` explicitly saying there will be many species.
+
+**The model's context window is not automatically big enough.** A page of text
+is a few hundred tokens; a whole paper plus its figures is tens of thousands.
+Ollama gives you a modest default context, and anything past it is *dropped
+without an error* — you get a confident answer based on the half of the paper
+the model actually saw. `num_ctx` is how you ask for room. We need to set a larger context. For very large papers, you may need a bigger model, more GPU memory, or both.
+
+This cell reads all seven pages and three figures, so it takes a couple of
+minutes.
+""")
+
+code("""
+PAPER_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "species": {"type": "array", "items": SPECIES_SCHEMA}
+    },
+    "required": ["species"],
+    "additionalProperties": False,
+}
+
+def pdf_text(doc, pages=None):
+    \"\"\"The whole text layer, page by page, with the page numbers left in.\"\"\"
+    pages = pages or range(1, doc.page_count + 1)
+    return "\\n\\n".join(f"--- page {p} ---\\n{get_page_text(doc, p)}" for p in pages)
+
+def pdf_figures(doc, pages=None, use_ocr=False):
+    \"\"\"Every figure in a document.
+
+    use_ocr=False only looks for figure objects, which is instant. Set it to
+    True for a scan, where finding a figure costs one OCR call per page.
+    \"\"\"
+    pages = pages or range(1, doc.page_count + 1)
+    finder = page_figures if use_ocr else figures_from_objects
+    return [fig for p in pages for fig in finder(doc, p)]
+
+def as_image_data(fig, max_side=1024):
+    \"\"\"A figure, shrunk if it is huge, encoded the way a model wants it.\"\"\"
+    small = fig.copy()
+    small.thumbnail((max_side, max_side))
+    buf = io.BytesIO()
+    small.save(buf, format="PNG")
+    return base64.b64encode(buf.getvalue()).decode()
+
+WHOLE_PAPER_PROMPT = (
+    "List every species this paper describes, using both the text and the "
+    "figures. name is the species name. author is the taxonomic authority for "
+    "that name -- the person who described it -- not an author of this paper; "
+    "for a species described as new here, use the paper's own authors. "
+    "min_length and max_length are the smallest and largest body length in mm "
+    "given for the species. Do not invent values that are not stated.\\n\\n"
 )
 
-def extract(text, schema=SPECIES_SCHEMA, model=CHAT_MODEL, client=None):
-    \"\"\"Pull structured data out of text.
+figures = pdf_figures(modern)
+text = pdf_text(modern)
+print(f"sending {len(text)} characters of text and {len(figures)} figures")
 
-    client is None for the local server. Session 5 passes a cloud client
-    instead, which is the only change needed to run this on a far bigger model.
+reply = ollama.chat(
+    model=CHAT_MODEL,
+    messages=[{"role": "user",
+               "content": WHOLE_PAPER_PROMPT + text,
+               "images": [as_image_data(f) for f in figures]}],
+    format=PAPER_SCHEMA,
+    think=False,
+    options={"temperature": 0, "num_ctx": 16384},
+)
+
+species = json.loads(reply.message.content)["species"]
+print(f"{len(species)} species\\n")
+pd.DataFrame(species)
+""")
+
+md("""
+Read that table against the paper. Because we used a schema, the shape is guaranteed - it will only have what we asked for. But there may be content errors.  Worth checking before you trust any of it:
+
+- Did it find every species, and only species that are really described here?
+- Are the lengths the ones in the text, or ones it assembled from nearby
+  numbers? A ratio, a scale bar and a body length all look alike to a model.
+- Is `author` a taxonomic authority, or did it fall back on "sp. n."? Compare
+  with what came back before we spelled the field out in the prompt.
+""")
+
+md("""
+### Two functions to carry forward
+
+Every extraction we have run has the same shape: text (and maybe figures) in, a
+schema and a prompt to say what we want back, JSON out, a table to look at.
+Let's name it once, because from here on — the exercise below, and all of
+Session 5 — we call these two instead of writing the call out again.
+
+**`extract()`**: takes the text, the schema and the prompt, and hands back the
+parsed JSON. `figures=` adds images to the message. `client=` sends the request
+to a different server, which is the only change Session 5 needs to run all of
+this on a much bigger model.
+
+**`to_table()`**: pulls the array of records out of the result and makes a
+DataFrame of it. The array's name is part of *your* schema, so it is an
+argument — `"species"` for `PAPER_SCHEMA`, something else for yours.
+
+Together they turn the cell above into one line:
+`to_table(extract(pdf_text(modern), figures=pdf_figures(modern)))`
+""")
+
+code("""
+def extract(text, schema=PAPER_SCHEMA, prompt=WHOLE_PAPER_PROMPT, figures=None,
+            model=CHAT_MODEL, client=None, num_ctx=16384):
+    \"\"\"Text (and figures) in, structured data out.
+
+    client is None for the server on this machine. Session 5 passes a client
+    pointed at Ollama's servers instead, which is the only change needed to
+    run any of this on a far bigger model.
     \"\"\"
+    message = {"role": "user", "content": prompt + text}
+    if figures:
+        message["images"] = [as_image_data(fig) for fig in figures]
+
     chat = (client or ollama).chat
     reply = chat(
         model=model,
-        messages=[{"role": "user", "content": EXTRACT_PROMPT + text}],
+        messages=[message],
         format=schema,
         think=False,
-        options={"temperature": 0},
+        options={"temperature": 0, "num_ctx": num_ctx},
     )
     return json.loads(reply.message.content)
 
-def to_table(data):
-    rows = [{"species": sp["name"], **t}
-            for sp in data.get("species", []) for t in sp.get("traits", [])]
-    return pd.DataFrame(rows)
+def to_table(data, key="species"):
+    \"\"\"The array of records inside an extraction result, as a table.
+
+    Our schemas wrap the records in one named array -- "species" in
+    PAPER_SCHEMA. Pass key= if you named yours something else.
+    \"\"\"
+    return pd.DataFrame(data.get(key, []))
 """)
 
-code("""
-data = extract(get_page_text(modern, 2) + get_page_text(modern, 4))
-df = to_table(data)
-print(f"{df['species'].nunique()} species, {len(df)} rows")
-df.head(10)
-""")
-
+# ════════════════════════════════════════════════════════ TRY IT YOURSELF
 md("""
-### The same, from the scan
+# Try it yourself
 
-Now the OCR text from the cell you started earlier.
+Now let's practice. Use the placeholders below to set the schema for each species, the global schema, and the prompt with the details of what you want. Try to extract some information of your choice from the historical pdf.
 """)
 
 code("""
-legacy_text = "\\n".join(legacy_ocr[p] for p in sorted(legacy_ocr))
-legacy_df = to_table(extract(legacy_text[:12000]))
-print(f"{legacy_df['species'].nunique()} species, {len(legacy_df)} rows")
-legacy_df.head(10)
-""")
+# ---------------------------------------------------------------- 1. one record
+# The fields you want for each thing you are extracting -- the equivalent of
+# SPECIES_SCHEMA above. Rename the placeholders and set each type to "string"
+# or "number".
+MY_ITEM_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "FIELD_ONE":   {"type": "string"},
+        "FIELD_TWO":   {"type": "string"},
+        "FIELD_THREE": {"type": "number"},
+    },
+    "required": ["FIELD_ONE"],       # only the fields that must always be there
+    "additionalProperties": False,
+}
 
-md("""
-### What a schema cannot do
+# ------------------------------------------------------------ 2. the whole answer
+# A paper holds many of them, so wrap the record schema in an array -- the
+# equivalent of PAPER_SCHEMA above. Rename "records" if you like, and pass the
+# same name to to_table() at the bottom.
+MY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "records": {"type": "array", "items": MY_ITEM_SCHEMA}
+    },
+    "required": ["records"],
+    "additionalProperties": False,
+}
 
-The schema fixes the shape. It says nothing about whether the numbers are
-sensible.
-""")
+# ------------------------------------------------------------------ 3. the prompt
+# Say what to extract, and say what every field means. Leaving a field
+# unexplained is how we got "sp. n." in the author column earlier.
+MY_PROMPT = (
+    "DESCRIBE WHAT TO EXTRACT HERE. "
+    "FIELD_ONE is ... FIELD_TWO is ... FIELD_THREE is ... "
+    "Do not invent values that are not stated in the text.\\n\\n"
+)
 
-code("""
-def implausible(row):
-    \"\"\"A check the schema cannot express.\"\"\"
-    if row.get("units") == "mm":
-        try:
-            mm = float(row["value"])
-        except (ValueError, TypeError):
-            return None
-        if not 0 < mm <= 300:
-            return f"{mm} mm is not plausible"
-    return None
+# ------------------------------------------------- 4. run it on the 1929 paper
+# The OCR text from the long-running cell at the start of this session -- not
+# the PDF's own text layer, which we know is corrupt.
+if "legacy_ocr" not in globals():          # e.g. after a runtime restart
+    legacy_ocr = {int(p): t for p, t in json.load(open("legacy_ocr.json")).items()}
 
-print(implausible({"units": "mm", "value": "5000"}))
-for _, row in df.iterrows():
-    if (problem := implausible(row)):
-        print(row["species"], row["trait"], "->", problem)
+legacy_text = "\\n\\n".join(f"--- page {p} ---\\n{legacy_ocr[p]}"
+                          for p in sorted(legacy_ocr))
+print(f"sending {len(legacy_text)} characters of OCR text")
+
+result = extract(legacy_text, schema=MY_SCHEMA, prompt=MY_PROMPT)
+# to send the plate as well:
+#     result = extract(legacy_text, schema=MY_SCHEMA, prompt=MY_PROMPT,
+#                      figures=pdf_figures(legacy, pages=[6], use_ocr=True))
+
+to_table(result, key="records")
 """)
 
 md("""
@@ -726,7 +1071,7 @@ that check is yours to write.
 Next: letting the model decide how to read a page.
 """)
 
-# ════════════════════════════════════════════════════════ SESSION 4
+# ══════════════════════════════════════════════════════════════ SESSION 4
 md("""
 ---
 # Session 4 — An agent that chooses
@@ -874,7 +1219,7 @@ is the judgement that carries over to your own pipelines.
 Next: doing this at scale.
 """)
 
-# ════════════════════════════════════════════════════════ SESSION 5
+# ══════════════════════════════════════════════════════════════ SESSION 5
 md("""
 ---
 # Session 5 — Scaling up
@@ -1086,16 +1431,100 @@ makes it survivable at scale. Swapping to a larger model is a one-line change.
   weights can be archived alongside your data, and a hosted model cannot.
 """)
 
-nb = {"cells": cells,
-      "metadata": {"kernelspec": {"display_name": "Python 3",
-                                  "language": "python", "name": "python3"},
-                   "language_info": {"name": "python"}},
-      "nbformat": 4, "nbformat_minor": 5}
 
-with open("workshop.ipynb", "w") as fh:
-    json.dump(nb, fh, indent=1, ensure_ascii=False)
-    fh.write("\n")
+METADATA = {
+    "kernelspec": {"display_name": "Python 3", "name": "python3"},
+    "language_info": {"name": "python"},
+    "colab": {"provenance": [], "gpuType": "T4", "include_colab_link": True},
+    "accelerator": "GPU",
+}
 
-print(f"wrote workshop.ipynb: {len(cells)} cells "
-      f"({sum(c['cell_type'] == 'code' for c in cells)} code, "
-      f"{sum(c['cell_type'] == 'markdown' for c in cells)} markdown)")
+
+def cell_id(source, taken):
+    """A short id that stays the same as long as the cell's text does."""
+    base = "c" + hashlib.sha1(source.encode()).hexdigest()[:11]
+    ident, n = base, 1
+    while ident in taken:          # two cells can hold identical source
+        n += 1
+        ident = f"{base}-{n}"
+    taken.add(ident)
+    return ident
+
+
+def body(cell):
+    """A cell's source, ignoring blank lines at either end."""
+    return "".join(cell["source"]).strip("\n")
+
+
+def keep_outputs(new_cells, path=NOTEBOOK):
+    """Carry ids, metadata and outputs over from the notebook on disk.
+
+    Matched on the source text, so a cell you did not touch keeps the output it
+    already had, and a cell you rewrote comes back empty -- which is honest,
+    since its old output no longer belongs to it.
+    """
+    previous = {}
+    if os.path.exists(path):
+        with open(path) as fh:
+            for cell in json.load(fh).get("cells", []):
+                previous.setdefault(body(cell), []).append(cell)
+
+    taken = set()
+    for cell in new_cells:
+        source = body(cell)
+        matches = previous.get(source)
+        if matches:
+            was = matches.pop(0)
+            cell["metadata"] = was.get("metadata", {})
+            if cell["cell_type"] == "code":
+                cell["outputs"] = was.get("outputs", [])
+                cell["execution_count"] = was.get("execution_count")
+            ident = was.get("id") or was.get("metadata", {}).get("id")
+            if ident and ident not in taken:
+                cell["id"] = ident
+                taken.add(ident)
+                continue
+        cell["id"] = cell_id(source, taken)
+    return new_cells
+
+
+def notebook():
+    return {"cells": keep_outputs(cells), "metadata": METADATA,
+            "nbformat": 4, "nbformat_minor": 5}
+
+
+def check(path=NOTEBOOK):
+    """Report whether the notebook on disk already says what this script says."""
+    if not os.path.exists(path):
+        print(f"{path} does not exist")
+        return False
+    with open(path) as fh:
+        theirs = [(c["cell_type"], body(c)) for c in json.load(fh)["cells"]]
+    ours = [(c["cell_type"], body(c)) for c in cells]
+    if theirs == ours:
+        print(f"{path} is up to date ({len(ours)} cells)")
+        return True
+
+    print(f"{path} and this script have drifted apart "
+          f"({len(theirs)} cells on disk, {len(ours)} here)")
+    for i, (mine, yours) in enumerate(zip(ours, theirs)):
+        if mine != yours:
+            print(f"first difference at cell {i}:")
+            print(f"  script:   {mine[1][:70]!r}")
+            print(f"  notebook: {yours[1][:70]!r}")
+            break
+    return False
+
+
+if __name__ == "__main__":
+    if "--check" in sys.argv:
+        sys.exit(0 if check() else 1)
+
+    nb = notebook()
+    with open(NOTEBOOK, "w") as fh:
+        json.dump(nb, fh, indent=2, ensure_ascii=False)
+    kept = sum(1 for c in nb["cells"] if c.get("outputs"))
+    print(f"wrote {NOTEBOOK}: {len(nb['cells'])} cells "
+          f"({sum(c['cell_type'] == 'code' for c in nb['cells'])} code, "
+          f"{sum(c['cell_type'] == 'markdown' for c in nb['cells'])} markdown); "
+          f"{kept} kept their outputs")
