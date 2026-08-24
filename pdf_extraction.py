@@ -52,7 +52,7 @@ MAX_FIGURE_AREA = 0.90         # bigger than this is a scan of the whole page
 SAMPLE_PAGES = 3               # pages of text layer shown to the model to judge
 SAMPLE_CHARS = 1_500           # per sampled page
 MIN_TEXT = 100                 # less text than this and there is nothing to judge
-STRATEGY_CTX = 4_096           # the sample is small, so this call can be too
+STRATEGY_CTX = 8_192           # small input, but reasoning needs somewhere to go
 
 # Sized for a 16 GB GPU. Raise max_chars and num_ctx together if you have more.
 MAX_CHARS = 30_000             # of document text sent to the model
@@ -124,6 +124,10 @@ def unload(model, client=None):
         pass
 
 
+class NoAnswer(RuntimeError):
+    """The model replied, but with nothing in the content to parse."""
+
+
 def _chat(messages, schema, model, client, num_ctx, think=False):
     chat = (client or ollama).chat
     try:
@@ -131,7 +135,20 @@ def _chat(messages, schema, model, client, num_ctx, think=False):
                      options={"temperature": 0, "num_ctx": num_ctx})
     except Exception as exc:
         raise _failed(model, exc) from exc
-    return json.loads(reply.message.content)
+
+    content = (reply.message.content or "").strip()
+    if not content:
+        why = getattr(reply, "done_reason", None)
+        detail = f" (done_reason={why})" if why else ""
+        if reply.message.thinking:
+            detail += (f", after {len(reply.message.thinking)} characters of "
+                       f"reasoning -- num_ctx={num_ctx} left no room for the answer")
+        raise NoAnswer(f"{model} returned no answer{detail}")
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"{model} did not return JSON: {content[:200]!r}") from exc
 
 
 def ocr_page(doc, page, dpi=DEFAULT_DPI):
@@ -215,13 +232,28 @@ def choose_strategy(doc, model=CHAT_MODEL, client=None,
     if len(sample.strip()) < MIN_TEXT:
         return {"needs_ocr": True,
                 "reason": "the PDF has no usable text layer at all"}
-    try:
-        return _chat([{"role": "user", "content": STRATEGY_PROMPT + sample}],
-                     STRATEGY_SCHEMA, model, client, num_ctx, think=True)
-    except Exception as exc:
-        if log:
-            log(f"    could not ask the model ({exc}) -- re-reading to be safe")
-        return {"needs_ocr": True, "reason": "could not get a judgement"}
+    messages = [{"role": "user", "content": STRATEGY_PROMPT + sample}]
+
+    # Reasoning makes this judgement better, but a model that reasons its way
+    # to the end of the context window answers with nothing at all. If that
+    # happens, ask again and let it answer straight away.
+    for reasoning in (True, False):
+        try:
+            return _chat(messages, STRATEGY_SCHEMA, model, client, num_ctx,
+                         think=reasoning)
+        except NoAnswer as exc:
+            if log:
+                log(f"    {exc}")
+                if reasoning:
+                    log("    asking again without reasoning")
+        except Exception as exc:
+            if log:
+                log(f"    could not ask the model ({exc})")
+            break
+
+    if log:
+        log("    no judgement, so re-reading the pages to be safe")
+    return {"needs_ocr": True, "reason": "could not get a judgement"}
 
 
 # ----------------------------------------------------------------------- figures
