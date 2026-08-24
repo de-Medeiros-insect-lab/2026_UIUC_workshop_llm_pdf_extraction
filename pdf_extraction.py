@@ -125,7 +125,15 @@ def unload(model, client=None):
 
 
 class NoAnswer(RuntimeError):
-    """The model replied, but with nothing in the content to parse."""
+    """The model replied, but with nothing in the content to parse.
+
+    Carries the reasoning it did produce, so the caller can hand it back.
+    """
+
+    def __init__(self, message, thinking="", done_reason=None):
+        super().__init__(message)
+        self.thinking = thinking or ""
+        self.done_reason = done_reason
 
 
 def _chat(messages, schema, model, client, num_ctx, think=False):
@@ -143,12 +151,57 @@ def _chat(messages, schema, model, client, num_ctx, think=False):
         if reply.message.thinking:
             detail += (f", after {len(reply.message.thinking)} characters of "
                        f"reasoning -- num_ctx={num_ctx} left no room for the answer")
-        raise NoAnswer(f"{model} returned no answer{detail}")
+        raise NoAnswer(f"{model} returned no answer{detail}",
+                       thinking=reply.message.thinking, done_reason=why)
     try:
         return json.loads(content)
     except json.JSONDecodeError as exc:
         raise RuntimeError(
             f"{model} did not return JSON: {content[:200]!r}") from exc
+
+
+RESUME_PROMPT = (
+    "You worked through this already and ran out of room before answering. "
+    "Your reasoning is below, and it is finished -- it may stop mid-sentence, "
+    "in which case draw your conclusion from as far as it got.\n\n"
+    "<thinking>\n{thinking}\n</thinking>\n\n"
+    "Do not reason any further. Give the answer now, in the required format, "
+    "based on the reasoning above."
+)
+
+
+def _answer(messages, schema, model, client, num_ctx, think=False,
+            attempts=2, log=None):
+    """Ask until there is an answer, not just reasoning.
+
+    Ollama cannot reserve output space for the answer -- there is no thinking
+    budget (ollama/ollama#10925) -- so a model given think=True can reason all
+    the way to the end of its context and come back with nothing at all.
+
+    Rather than throw that reasoning away and start again, we hand it back as
+    finished text, with room to spare and no further thinking allowed, and ask
+    only for the conclusion.
+
+    Two attempts, deliberately: a model that will not answer even when handed
+    its own reasoning and told not to think is not going to be talked round by
+    a third try, and doubling num_ctx again would ask a 16 GB GPU for a context
+    it cannot allocate.
+    """
+    for attempt in range(1, attempts + 1):
+        try:
+            return _chat(messages, schema, model, client, num_ctx, think=think)
+        except NoAnswer as exc:
+            if attempt == attempts or not exc.thinking:
+                raise
+            if log:
+                log(f"    {exc}")
+                log(f"    handing its own reasoning back and asking for the "
+                    f"answer alone, with num_ctx={num_ctx * 2}")
+            messages = list(messages) + [
+                {"role": "user",
+                 "content": RESUME_PROMPT.format(thinking=exc.thinking)}]
+            num_ctx *= 2          # the reasoning we just added has to fit too
+            think = False         # it has done the thinking; we want the answer
 
 
 def ocr_page(doc, page, dpi=DEFAULT_DPI):
@@ -233,27 +286,14 @@ def choose_strategy(doc, model=CHAT_MODEL, client=None,
         return {"needs_ocr": True,
                 "reason": "the PDF has no usable text layer at all"}
     messages = [{"role": "user", "content": STRATEGY_PROMPT + sample}]
-
-    # Reasoning makes this judgement better, but a model that reasons its way
-    # to the end of the context window answers with nothing at all. If that
-    # happens, ask again and let it answer straight away.
-    for reasoning in (True, False):
-        try:
-            return _chat(messages, STRATEGY_SCHEMA, model, client, num_ctx,
-                         think=reasoning)
-        except NoAnswer as exc:
-            if log:
-                log(f"    {exc}")
-                if reasoning:
-                    log("    asking again without reasoning")
-        except Exception as exc:
-            if log:
-                log(f"    could not ask the model ({exc})")
-            break
-
-    if log:
-        log("    no judgement, so re-reading the pages to be safe")
-    return {"needs_ocr": True, "reason": "could not get a judgement"}
+    try:
+        return _answer(messages, STRATEGY_SCHEMA, model, client, num_ctx,
+                       think=True, log=log)
+    except Exception as exc:
+        if log:
+            log(f"    could not get a judgement ({exc})")
+            log("    re-reading the pages to be safe")
+        return {"needs_ocr": True, "reason": "could not get a judgement"}
 
 
 # ----------------------------------------------------------------------- figures
@@ -395,7 +435,7 @@ def ask(text, figures, prompt, schema, model=CHAT_MODEL, client=None,
     if figures:
         message["images"] = [as_image_data(f) for f in figures[:max_figures]]
 
-    answer = _chat([message], schema, model, client, num_ctx)
+    answer = _answer([message], schema, model, client, num_ctx, log=log)
     key = record_key(schema)
     records = answer.get(key, []) if key else [answer]
     return records if isinstance(records, list) else [records]
