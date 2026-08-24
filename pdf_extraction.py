@@ -10,6 +10,11 @@ from their images? — and then reads the document whichever way the answer says
 pulls out the figures, asks for exactly the fields your schema describes, and
 returns one table.
 
+The work is done in three passes — every judgement, then every transcription,
+then every extraction — so that only one model is ever resident. Two models of
+this size do not fit on a 16 GB GPU together, and it is the second one to load
+that fails.
+
 That first question is the whole point. A scanned paper usually *has* embedded
 text, left behind by an OCR pass that ran years ago, and it is often wrong in
 ways nothing in the file admits to. No rule about odd characters survives
@@ -47,6 +52,7 @@ MAX_FIGURE_AREA = 0.90         # bigger than this is a scan of the whole page
 SAMPLE_PAGES = 3               # pages of text layer shown to the model to judge
 SAMPLE_CHARS = 1_500           # per sampled page
 MIN_TEXT = 100                 # less text than this and there is nothing to judge
+STRATEGY_CTX = 4_096           # the sample is small, so this call can be too
 
 # Sized for a 16 GB GPU. Raise max_chars and num_ctx together if you have more.
 MAX_CHARS = 30_000             # of document text sent to the model
@@ -56,15 +62,75 @@ NUM_CTX = 16_384               # context window to ask Ollama for
 
 # ---------------------------------------------------------------- talking to models
 
+def _failed(model, exc):
+    """The error the server actually gave, plus a guess at what to do."""
+    detail = str(exc)
+    low = detail.lower()
+    if "memory" in low or "resource" in low:
+        hint = ("\n  The GPU could not fit it. Another model is probably still "
+                "resident -- lower num_ctx, or free it first.")
+    elif "not found" in low or "no such" in low or "404" in low:
+        hint = f"\n  Run `ollama pull {model}`."
+    elif "connect" in low or "refused" in low:
+        hint = "\n  The Ollama server is not answering. Is `ollama serve` running?"
+    else:
+        hint = ""
+    return RuntimeError(f"{model} failed: {detail}{hint}")
+
+
+def installed_models():
+    """What the server has, or None if the server cannot be reached."""
+    try:
+        listing = (ollama.list() or {})
+    except Exception:
+        return None
+    models = getattr(listing, "models", None)
+    if models is None and isinstance(listing, dict):
+        models = listing.get("models", [])
+    names = set()
+    for entry in models or []:
+        name = getattr(entry, "model", None)
+        if name is None and isinstance(entry, dict):
+            name = entry.get("model")
+        if name:
+            names.add(name)
+            names.add(name.split(":")[0])   # deepseek-ocr as well as :latest
+    return names
+
+
+def require_models(*wanted):
+    """Fail before doing any work if a model we are going to need is absent."""
+    have = installed_models()
+    if have is None:
+        raise RuntimeError(
+            "Cannot reach the Ollama server. Is `ollama serve` running?")
+    missing = [n for n in wanted if n not in have and n.split(":")[0] not in have]
+    if missing:
+        raise RuntimeError(
+            "Not installed: " + ", ".join(missing) + "\n  Run "
+            + "; ".join(f"`ollama pull {n}`" for n in missing)
+            + f"\n  Installed: {', '.join(sorted(n for n in have if ':' in n))}")
+
+
+def unload(model, client=None):
+    """Drop a model from memory now, so the next one has room to load.
+
+    Best effort: if the server will not, we carry on and let the next call
+    report whatever goes wrong.
+    """
+    try:
+        (client or ollama).generate(model=model, prompt="", keep_alive=0)
+    except Exception:
+        pass
+
+
 def _chat(messages, schema, model, client, num_ctx, think=False):
     chat = (client or ollama).chat
     try:
         reply = chat(model=model, messages=messages, format=schema, think=think,
                      options={"temperature": 0, "num_ctx": num_ctx})
     except Exception as exc:
-        raise RuntimeError(
-            f"Could not reach model {model!r}. Is the Ollama server running, "
-            f"and have you run `ollama pull {model}`?") from exc
+        raise _failed(model, exc) from exc
     return json.loads(reply.message.content)
 
 
@@ -78,9 +144,7 @@ def ocr_page(doc, page, dpi=DEFAULT_DPI):
             options={"temperature": 0, "num_predict": 4096},
         )
     except Exception as exc:
-        raise RuntimeError(
-            f"Could not reach model {OCR_MODEL!r}. Is the Ollama server "
-            f"running, and have you run `ollama pull {OCR_MODEL}`?") from exc
+        raise _failed(OCR_MODEL, exc) from exc
     return reply.response or ""
 
 
@@ -137,7 +201,8 @@ def sample_pages(page_count, how_many=SAMPLE_PAGES):
                    for i in range(how_many)})
 
 
-def choose_strategy(doc, model=CHAT_MODEL, client=None, num_ctx=NUM_CTX, log=None):
+def choose_strategy(doc, model=CHAT_MODEL, client=None,
+                    num_ctx=STRATEGY_CTX, log=None):
     """Ask a reasoning model how this document should be read.
 
     Returns {"needs_ocr": bool, "reason": str}. If the model cannot be reached
@@ -221,25 +286,53 @@ def as_image_data(fig, max_side=1024):
 
 # --------------------------------------------------------------------- documents
 
-def read_document(doc, needs_ocr, max_pages=None, dpi=DEFAULT_DPI,
-                  figures=True, log=None):
-    """A whole PDF as (text, figures), read the way the strategy says."""
+def transcribe(doc, max_pages=None, dpi=DEFAULT_DPI, cache_path=None, log=None):
+    """Every page of a document, re-read from its image. {page: text}
+
+    With a cache_path, each page is written as soon as it is transcribed and
+    read back on a later run, so a run that dies at page 40 of 60 does not
+    start over. This is the expensive pass, and the one most likely to be
+    interrupted.
+    """
+    pages = {}
+    if cache_path and os.path.exists(cache_path):
+        with open(cache_path) as fh:
+            pages = {int(page): text for page, text in json.load(fh).items()}
+
+    last = doc.page_count if max_pages is None else min(max_pages, doc.page_count)
+    for page in range(1, last + 1):
+        if page in pages:
+            if log:
+                log(f"    page {page}: kept from an earlier run")
+            continue
+        pages[page] = ocr_page(doc, page, dpi=dpi)
+        if log:
+            log(f"    page {page}: {len(pages[page])} chars")
+        if cache_path:
+            with open(cache_path, "w") as fh:
+                json.dump(pages, fh)
+    return {page: pages[page] for page in range(1, last + 1) if page in pages}
+
+
+def assemble(doc, transcript=None, max_pages=None, figures=True):
+    """A document as (text, figures). No model calls: everything is in hand.
+
+    transcript is the output of transcribe() for a scan, or None to use the
+    text and the figure objects the PDF carries itself.
+    """
     last = doc.page_count if max_pages is None else min(max_pages, doc.page_count)
     chunks, found = [], []
     for page in range(1, last + 1):
-        if needs_ocr:
-            transcription = ocr_page(doc, page, dpi=dpi)
-            chunks.append(f"--- page {page} ---\n{transcription}")
-            if figures:
-                # We already paid for the OCR, so reuse it to place the figures.
-                found += [crop_region(doc, page, box)
-                          for box in figure_boxes(transcription)]
-            if log:
-                log(f"    page {page}: re-read ({len(transcription)} chars)")
-        else:
+        if transcript is None:
             chunks.append(f"--- page {page} ---\n{page_text(doc, page)}")
             if figures:
                 found += figures_from_objects(doc, page)
+        else:
+            text = transcript.get(page, "")
+            chunks.append(f"--- page {page} ---\n{text}")
+            if figures:
+                # We already paid for the OCR, so reuse it to place the figures.
+                found += [crop_region(doc, page, box) for box in figure_boxes(text)]
     return "\n\n".join(chunks), found
 
 
@@ -256,10 +349,30 @@ def record_key(schema):
     return None
 
 
+def ask(text, figures, prompt, schema, model=CHAT_MODEL, client=None,
+        max_chars=MAX_CHARS, max_figures=MAX_FIGURES, num_ctx=NUM_CTX, log=None):
+    """One extraction call: text and figures in, a list of records out."""
+    if len(text) > max_chars and log:
+        log(f"    text truncated to {max_chars} of {len(text)} characters "
+            f"-- raise max_chars and num_ctx together to send it all")
+    if len(figures) > max_figures and log:
+        log(f"    sending {max_figures} of {len(figures)} figures "
+            f"-- raise max_figures to send them all")
+
+    message = {"role": "user", "content": prompt + text[:max_chars]}
+    if figures:
+        message["images"] = [as_image_data(f) for f in figures[:max_figures]]
+
+    answer = _chat([message], schema, model, client, num_ctx)
+    key = record_key(schema)
+    records = answer.get(key, []) if key else [answer]
+    return records if isinstance(records, list) else [records]
+
+
 def extract_document(path, prompt, schema, model=CHAT_MODEL, client=None,
                      needs_ocr=None, figures=True, max_pages=None,
                      max_chars=MAX_CHARS, max_figures=MAX_FIGURES,
-                     num_ctx=NUM_CTX, log=None):
+                     num_ctx=NUM_CTX, cache_path=None, log=None):
     """One PDF in, a list of records out.
 
     needs_ocr is None to let the model decide, or True/False when you already
@@ -268,32 +381,25 @@ def extract_document(path, prompt, schema, model=CHAT_MODEL, client=None,
     doc = open_pdf(path)
 
     if needs_ocr is None:
-        verdict = choose_strategy(doc, model=model, client=client,
-                                  num_ctx=num_ctx, log=log)
+        verdict = choose_strategy(doc, model=model, client=client, log=log)
         needs_ocr = verdict["needs_ocr"]
         if log:
             route = f"re-reading every page with {OCR_MODEL}" if needs_ocr \
                     else "using the text stored in the PDF"
             log(f"    {route} — {verdict['reason']}")
 
-    text, found = read_document(doc, needs_ocr, max_pages=max_pages,
-                                figures=figures, log=log)
+    transcript = None
+    if needs_ocr:
+        unload(model, client)                 # make room for the OCR model
+        require_models(OCR_MODEL)
+        transcript = transcribe(doc, max_pages=max_pages,
+                                cache_path=cache_path, log=log)
+        unload(OCR_MODEL, client)             # and give the GPU back
 
-    if len(text) > max_chars and log:
-        log(f"    text truncated to {max_chars} of {len(text)} characters "
-            f"-- raise max_chars and num_ctx together to send it all")
-    if len(found) > max_figures and log:
-        log(f"    sending {max_figures} of {len(found)} figures "
-            f"-- raise max_figures to send them all")
-
-    message = {"role": "user", "content": prompt + text[:max_chars]}
-    if found:
-        message["images"] = [as_image_data(f) for f in found[:max_figures]]
-
-    answer = _chat([message], schema, model, client, num_ctx)
-    key = record_key(schema)
-    records = answer.get(key, []) if key else [answer]
-    return records if isinstance(records, list) else [records]
+    text, found = assemble(doc, transcript, max_pages=max_pages, figures=figures)
+    return ask(text, found, prompt, schema, model=model, client=client,
+               max_chars=max_chars, max_figures=max_figures, num_ctx=num_ctx,
+               log=log)
 
 
 def extract_folder(folder, prompt, schema, model=CHAT_MODEL, client=None,
@@ -310,50 +416,119 @@ def extract_folder(folder, prompt, schema, model=CHAT_MODEL, client=None,
     which file it came from. A document that fails is reported and skipped, so
     one bad PDF does not cost you the rest of the run.
 
-    For a long run, pass cache_dir="somewhere": each document's records are
-    written there as they are finished and read back instead of being redone,
-    so a run that dies at document 150 does not start over. Delete the folder
-    when you change the prompt or the schema.
+    The work runs in three passes -- judge every document, transcribe every
+    document that needs it, then extract from all of them -- so each model is
+    loaded once for the whole folder instead of once per document. Two models
+    this size will not sit on a 16 GB GPU together.
+
+    For a long run, pass cache_dir="somewhere": transcribed pages are written
+    as they are read and finished records as they are extracted, both read back
+    instead of being redone. Delete the folder when you change prompt or schema.
     """
     log = (lambda msg: print(msg, flush=True)) if progress else None
     paths = sorted(glob.glob(os.path.join(folder, "*.pdf")))
     if not paths:
         raise FileNotFoundError(f"no PDFs in {folder!r}")
+    require_models(model)
     if cache_dir:
         os.makedirs(cache_dir, exist_ok=True)
 
-    frames = []
-    for path in paths:
-        name = os.path.basename(path)
-        cached = os.path.join(cache_dir, name + ".json") if cache_dir else None
-        if log:
-            log(name)
+    def cache_file(path, suffix):
+        return (os.path.join(cache_dir, os.path.basename(path) + suffix)
+                if cache_dir else None)
 
-        if cached and os.path.exists(cached):
-            with open(cached) as fh:
-                records = json.load(fh)
+    # Anything already extracted needs none of the three passes.
+    records = {}
+    pending = []
+    for path in paths:
+        done = cache_file(path, ".records.json")
+        if done and os.path.exists(done):
+            with open(done) as fh:
+                records[path] = json.load(fh)
             if log:
-                log(f"    {len(records)} record(s) from an earlier run")
+                log(f"{os.path.basename(path)}: {len(records[path])} record(s) "
+                    f"from an earlier run")
         else:
+            pending.append(path)
+
+    docs = {path: open_pdf(path) for path in pending}
+
+    # Pass 1 -- how should each document be read? The chat model loads once.
+    plans = {}
+    if pending and log:
+        log("deciding how to read each document")
+    for path in pending:
+        name = os.path.basename(path)
+        if needs_ocr is not None:
+            plans[path] = needs_ocr
+            if log:
+                log(f"  {name}: told to "
+                    f"{'re-read the pages' if needs_ocr else 'use the stored text'}")
+            continue
+        try:
+            verdict = choose_strategy(docs[path], model=model, client=client, log=log)
+        except Exception as exc:
+            if log:
+                log(f"  {name}: FAILED -- {exc}")
+            plans[path] = None
+            continue
+        plans[path] = verdict["needs_ocr"]
+        if log:
+            route = "re-reading every page" if verdict["needs_ocr"] \
+                    else "using the stored text"
+            log(f"  {name}: {route} — {verdict['reason']}")
+
+    # Pass 2 -- all the transcription together. The OCR model loads once.
+    transcripts = {}
+    if any(plans.get(p) for p in pending):
+        unload(model, client)
+        require_models(OCR_MODEL)
+        for path in pending:
+            if not plans.get(path):
+                continue
+            name = os.path.basename(path)
+            if log:
+                log(f"re-reading {name} with {OCR_MODEL}")
             try:
-                records = extract_document(
-                    path, prompt, schema, model=model, client=client,
-                    needs_ocr=needs_ocr, figures=figures, max_pages=max_pages,
-                    max_chars=max_chars, max_figures=max_figures,
-                    num_ctx=num_ctx, log=log)
+                transcripts[path] = transcribe(
+                    docs[path], max_pages=max_pages,
+                    cache_path=cache_file(path, ".ocr.json"), log=log)
             except Exception as exc:
                 if log:
                     log(f"    FAILED -- {exc}")
-                continue
-            if cached:
-                with open(cached, "w") as fh:
-                    json.dump(records, fh, indent=1)
+                plans[path] = None
+        unload(OCR_MODEL, client)
+
+    # Pass 3 -- extraction. The chat model loads once more.
+    for path in pending:
+        if plans.get(path) is None:
+            continue
+        name = os.path.basename(path)
+        if log:
+            log(f"extracting from {name}")
+        text, found = assemble(docs[path], transcripts.get(path),
+                               max_pages=max_pages, figures=figures)
+        try:
+            got = ask(text, found, prompt, schema, model=model, client=client,
+                      max_chars=max_chars, max_figures=max_figures,
+                      num_ctx=num_ctx, log=log)
+        except Exception as exc:
             if log:
-                log(f"    {len(records)} record(s)")
+                log(f"    FAILED -- {exc}")
+            continue
+        records[path] = got
+        if log:
+            log(f"    {len(got)} record(s)")
+        done = cache_file(path, ".records.json")
+        if done:
+            with open(done, "w") as fh:
+                json.dump(got, fh, indent=1)
 
-        if records:
-            frame = pd.DataFrame(records)
-            frame.insert(0, "source", name)
+    frames = []
+    for path in paths:
+        got = records.get(path)
+        if got:
+            frame = pd.DataFrame(got)
+            frame.insert(0, "source", os.path.basename(path))
             frames.append(frame)
-
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
