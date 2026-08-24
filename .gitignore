@@ -2,3 +2,16 @@
 __pycache__/
 .DS_Store
 pdf_data_extraction.ipynb
+
+# Uploaded PDFs. The two example papers are already tracked, so this only stops
+# a new one being committed by accident -- which is how an unpublished
+# manuscript ended up in this repository once. Use `git add -f` for a paper you
+# really do mean to publish here.
+example_pdfs/*.pdf
+my_pdfs/
+
+# Run output
+results/
+legacy_ocr.json
+my_results.csv
+figure_*.png
