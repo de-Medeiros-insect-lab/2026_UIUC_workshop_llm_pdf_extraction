@@ -587,95 +587,158 @@ if figures:
 """)
 
 md("""
-### One function for both kinds of PDF
+### Reading a page in order
 
-We have now done the job in two completely different ways: for
-the born-digital paper we asked the PDF for its image objects, and for the scan
-we asked the OCR model where the figures were and cut them out ourselves.
+We can pull the text out of a page, and we can pull the figures out of a page.
+But we have been pulling them out *separately*, and that throws something away:
+which caption belongs to which figure.
 
-Let's wrap both up so we can point them at any page of any PDF. Again, do not
-worry about the details — the useful part is the last function, `page_figures()`,
-which tries the easy route first and only calls the OCR model if the page turns
-out to have no figure objects in it.
+Page 5 of the modern paper carries two figures and two captions. Hand a model
+all the text and then all the pictures and it sees four things, with no way to
+know that FIGURE 3 describes the first picture and FIGURE 4 the second.
 
-**`figure_boxes()`**: groups each `image` region the OCR model found with the `image_caption` that belongs to it.
+So let's read a page the way you would: top to bottom, taking each piece as it
+comes.
 
-**`figures_from_ocr()`**: OCRs a page, then crops out every figure it reported. For scans.
+**ocr_elements()**: splits the OCR model's answer into its regions, in the order it read them. The text after each marker belongs to that marker.
 
-**`figures_from_objects()`**: pulls out the figures a born-digital PDF stores as objects. A scanned page holds exactly one image object — the photograph of the whole page — so we ignore anything covering most of the page, and anything tiny (journal logos, publisher marks).
-
-**`page_figures()`**: objects if there are any, OCR otherwise.
-
-**`show_figures()`**: displays them at a sane size.
+**page_elements()**: one page as a list of `("text", ...)` and `("figure", ...)`, in reading order. On a scan the OCR model has already done the ordering for us. On a born-digital page we sort the text blocks and the image rectangles by where they sit.
 """)
 
 code("""
 MIN_FIGURE_AREA = 0.03   # smaller than this is a logo, not a figure
-MAX_FIGURE_AREA = 0.90   # bigger than this is the page scan itself
+MAX_FIGURE_AREA = 0.90   # bigger than this is a scan of the whole page
 
-def figure_boxes(ocr_text):
-    \"\"\"One box per figure, each grown to include its caption. Scaled 0-1000.\"\"\"
-    regs     = regions(ocr_text)
-    images   = [r for r in regs if r[0] == "image"]
-    captions = [r for r in regs if r[0] == "image_caption"]
-    boxes = []
-    for img in images:
-        group = [img] + [c for c in captions
-                         if c[1] < img[3] and c[3] > img[1]   # overlaps it sideways
-                         and abs(c[2] - img[4]) < 100]        # and sits just below
-        boxes.append(("figure",
-                      min(g[1] for g in group), min(g[2] for g in group),
-                      max(g[3] for g in group), max(g[4] for g in group)))
-    return boxes
-
-def figures_from_ocr(doc, page, dpi=150, pad=0.01):
-    \"\"\"Figures on a scanned page: the OCR model finds them, we cut them out.\"\"\"
-    return [crop_region(doc, page, box, dpi=dpi, pad=pad)
-            for box in figure_boxes(ocr_page(doc, page))]
-
-def figures_from_objects(doc, page):
-    \"\"\"Figures a born-digital PDF stores as objects, ready to pull out.\"\"\"
-    pg = doc[page - 1]
-    page_area = pg.rect.width * pg.rect.height
+def ocr_elements(ocr_text):
+    \"\"\"The OCR model's regions, in the order it read them: (label, box, text).\"\"\"
+    marks = list(re.finditer(
+        r"(\\w+)\\s*\\[\\[\\s*(\\d+),\\s*(\\d+),\\s*(\\d+),\\s*(\\d+)\\s*\\]\\]", ocr_text))
     found = []
+    for i, mark in enumerate(marks):
+        stop = marks[i + 1].start() if i + 1 < len(marks) else len(ocr_text)
+        box = ("region", *(int(mark.group(k)) for k in range(2, 6)))
+        found.append((mark.group(1), box, ocr_text[mark.end():stop].strip()))
+    return found
+
+def page_elements(doc, page, transcript=None, dpi=150):
+    \"\"\"A page as ("text", str) and ("figure", Image) pieces, in reading order.\"\"\"
+    if transcript is not None:                    # a scan: already in order
+        pieces = []
+        for label, box, text in ocr_elements(transcript):
+            if label == "image":
+                pieces.append(("figure", crop_region(doc, page, box, dpi=dpi)))
+            elif text:
+                pieces.append(("text", text))
+        return pieces
+
+    pg = doc[page - 1]                            # born-digital: sort by
+    page_area = pg.rect.width * pg.rect.height    # where things sit
+    placed = []
+    for x0, y0, x1, y1, text, _, kind in pg.get_text("blocks", sort=True):
+        if kind == 0 and text.strip():
+            placed.append((y0, ("text", text.strip())))
     for xref, *_ in pg.get_images(full=True):
-        placed = pg.get_image_rects(xref)
-        share = max((r.width * r.height) / page_area for r in placed) if placed else 0
+        rects = pg.get_image_rects(xref)
+        if not rects:
+            continue
+        share = max((r.width * r.height) / page_area for r in rects)
         if not MIN_FIGURE_AREA <= share <= MAX_FIGURE_AREA:
             continue
         # extract_image gives the bytes as stored, whatever the colour depth:
-        # line art at 1 bit per pixel comes back just as happily as a photo.
-        found.append(Image.open(io.BytesIO(doc.extract_image(xref)["image"])))
-    return found
-
-def page_figures(doc, page, dpi=150):
-    \"\"\"Every figure on a page, whichever kind of PDF it came from.
-
-    Cheap route first: if the page has figure objects, we are done. Only if it
-    has none do we pay for an OCR call to go looking in the pixels.
-    \"\"\"
-    return figures_from_objects(doc, page) or figures_from_ocr(doc, page, dpi=dpi)
-
-def show_figures(figs, width=350):
-    \"\"\"Display figures small enough to fit in a notebook.\"\"\"
-    print(len(figs), "figure(s)")
-    for fig in figs:
-        small = fig.copy()
-        small.thumbnail((width, 4 * width))
-        display(small)
+        # line art at 1 bit per pixel comes back as readily as a photograph.
+        figure = Image.open(io.BytesIO(doc.extract_image(xref)["image"]))
+        placed.append((rects[0].y0, ("figure", figure)))
+    return [piece for _, piece in sorted(placed, key=lambda item: item[0])]
 """)
 
 md("""
-Let's check it against the two pages we just did by hand — page 3 of the modern
-paper (objects, instant) and page 6 of the scan (OCR, slower):
+Page 5 of the modern paper, and page 6 of the scan, read in order:
 """)
 
 code("""
-print("modern, page 3:")
-show_figures(page_figures(modern, 3))
+def show_elements(pieces):
+    for kind, value in pieces:
+        if kind == "text":
+            print(f"  text   {' '.join(value.split())[:72]}")
+        else:
+            print(f"  figure {value.size[0]}x{value.size[1]}")
 
-print("legacy, page 6:")      # no objects here, so this one calls the OCR model
-show_figures(page_figures(legacy, 6))
+print("MODERN, page 5 (figure objects, instant):")
+show_elements(page_elements(modern, 5))
+
+print("\\nLEGACY, page 6 (one OCR call, then we cut the figure out):")
+show_elements(page_elements(legacy, 6, transcript=ocr_page(legacy, 6)))
+""")
+
+md("""
+### Writing the whole document out
+
+Now we can do this for every page of a document and **save the result to a
+folder**, so that what the model gets is something you can open and read:
+
+```
+processed/deMedeiros2013Zootaxa/
+    page-001.md ... page-007.md
+    figures/p005-fig01.png
+    document.json
+```
+
+Each page becomes markdown, in reading order, with its figures linked where
+they appeared. A caption sits under its own figure, exactly as in the paper.
+
+This also means we only ever pay for OCR once. A page already written is left
+alone, so if the runtime dies you carry on where you stopped — and if one page
+came out badly, delete it and only that page is read again.
+""")
+
+code("""
+def process_pdf(path, out_dir="processed", needs_ocr=False):
+    \"\"\"Turn a PDF into a folder of markdown pages you can open and read.\"\"\"
+    name = os.path.splitext(os.path.basename(path))[0]
+    folder = os.path.join(out_dir, name)
+    os.makedirs(os.path.join(folder, "figures"), exist_ok=True)
+
+    doc = open_pdf(path)
+    for page in range(1, doc.page_count + 1):
+        page_file = os.path.join(folder, f"page-{page:03d}.md")
+        if os.path.exists(page_file):
+            continue                      # done on an earlier run
+
+        transcript = ocr_page(doc, page) if needs_ocr else None
+        lines, figures = [], 0
+        for kind, value in page_elements(doc, page, transcript):
+            if kind == "text":
+                lines.append(value)
+            else:
+                figures += 1
+                relative = f"figures/p{page:03d}-fig{figures:02d}.png"
+                value.save(os.path.join(folder, relative))
+                lines.append(f"![figure]({relative})")
+        with open(page_file, "w") as fh:
+            fh.write(f"# page {page}\\n\\n" + "\\n\\n".join(lines) + "\\n")
+        print(f"  page {page}: {figures} figure(s)")
+    return folder
+
+# The modern paper is quick -- its text is already there.
+print("deMedeiros2013Zootaxa:")
+modern_folder = process_pdf("example_pdfs/deMedeiros2013Zootaxa.pdf")
+
+# The scan needs an OCR call per page. Start it and keep listening.
+print("Marshall1929_AnnMagNatHist:")
+legacy_folder = process_pdf("example_pdfs/Marshall1929_AnnMagNatHist.pdf",
+                            needs_ocr=True)
+""")
+
+md("""
+Open the folder icon 📁 in the left sidebar and look inside `processed/`. Click
+a `page-*.md` file. That is the document as the model will receive it.
+
+Here is page 5 of the modern paper — two figures, each followed by its own
+caption:
+""")
+
+code("""
+print(open(f"{modern_folder}/page-005.md").read())
 """)
 
 md("""
@@ -695,42 +758,50 @@ Things worth looking for:
 - Is there a text layer at all? A pure scan may give you nothing.
 - Where do the text layer and the fresh OCR disagree? Those disagreements are
   where a silently wrong extraction would come from.
-- Did `page_figures()` find your figures? If your paper is born-digital and it
-  came back empty, the figure may be *drawn* in the PDF as vector art rather
-  than stored as an image object — there is no object to pull out, so treat that
-  page like a scan and pass `figures_from_ocr(doc, page)` instead.
+- Did the figures come out? If your paper is born-digital and none did, they
+  may be *drawn* in the PDF as vector art rather than stored as image objects —
+  there is nothing to pull out, so set `MY_NEEDS_OCR = True` and let the OCR
+  model find them in the pixels instead.
+- Do the captions sit under the right figures in the markdown?
 """)
 
 code("""
-MY_PDF  = "example_pdfs/CHANGE_THIS.pdf"   # your file, uploaded into example_pdfs/
-MY_PAGE = 1                                # the page you want to look at
+MY_PDF = "example_pdfs/CHANGE_THIS.pdf"   # your file, uploaded into example_pdfs/
 
 if not os.path.exists(MY_PDF):
-    print(f"{MY_PDF} not found. Files currently in example_pdfs/:")
+    print(f"{MY_PDF} not found. PDFs currently in example_pdfs/:")
     for f in sorted(glob.glob("example_pdfs/*.pdf")):
         print("   ", f)
 else:
     mine = open_pdf(MY_PDF)
     print(f"{MY_PDF}: {mine.page_count} pages\\n")
 
-    print("--- the PDF's own text layer ---")
-    print(get_page_text(mine, MY_PAGE)[:800] or "(empty — this page is a pure scan)")
+    # Is its own text trustworthy, or does it need re-reading? Look and decide.
+    print("--- the PDF's own text, page 1 ---")
+    print(get_page_text(mine, 1)[:600] or "(empty -- a pure scan)")
 
-    print("\\n--- a fresh OCR transcription of the same page ---")
-    print(ocr_page(mine, MY_PAGE)[:800])
+    print("\\n--- the same page, re-read by the OCR model ---")
+    print(ocr_page(mine, 1)[:600])
 
-    print("\\n--- figures ---")
-    show_figures(page_figures(mine, MY_PAGE))
+    # Set this once you have looked: True re-reads every page, False trusts
+    # the text the PDF already carries.
+    MY_NEEDS_OCR = False
+
+    print(f"\\n--- writing processed/{os.path.basename(MY_PDF)[:-4]}/ ---")
+    my_folder = process_pdf(MY_PDF, needs_ocr=MY_NEEDS_OCR)
+    print("open it in the sidebar and read a page")
 """)
 
 md("""
 **Recap.** Born-digital PDFs give you clean text and figures as objects. Scans
 give you pixels and, often, a text layer that is wrong without saying so. OCR
-recovers the text and tells you where each region sits, which is enough to cut
-figures out of a page that contains no figure objects. `page_figures()` picks
-between the two for you.
+recovers the text and tells you where each region sits.
 
-Next: turning this text into data.
+The piece that matters most is the *order*. Reading a page top to bottom keeps
+each caption with the figure it describes, and writing the result to a folder
+means you can look at exactly what the model will be given — before you give it.
+
+Next: turning those pages into data.
 """)
 
 # ══════════════════════════════════════════════════════════════ SESSION 3
@@ -753,15 +824,33 @@ We will start by using our OCR model to extract the text from our legacy paper. 
 """)
 
 code("""
-# Long-running: OCR every page of the scanned paper and keep the text.
-legacy_ocr = {}
-for pno in range(2, legacy.page_count + 1):
-    legacy_ocr[pno] = ocr_page(legacy, pno)
-    print(f"page {pno} done ({len(legacy_ocr[pno])} chars)")
+def load_pages(folder, pages=None):
+    \"\"\"A processed folder back as (text, figures), ready to send to a model.
 
-with open("legacy_ocr.json", "w") as fh:
-    json.dump(legacy_ocr, fh, indent=1)
-print("saved legacy_ocr.json")
+    Ollama attaches images to a message rather than placing them in the text,
+    so each figure link becomes a numbered marker where it stood, and the
+    figures are handed over in that same order.
+    \"\"\"
+    wanted = None if pages is None else {int(p) for p in pages}
+    chunks, figures = [], []
+
+    for page_file in sorted(glob.glob(os.path.join(folder, "page-*.md"))):
+        page = int(os.path.basename(page_file)[5:8])
+        if wanted is not None and page not in wanted:
+            continue
+        with open(page_file) as fh:
+            text = fh.read()
+
+        def mark(match):
+            figures.append(Image.open(os.path.join(folder, match.group(1))))
+            return f"[figure {len(figures)} appears here]"
+
+        chunks.append(re.sub(r"!\\[[^\\]]*\\]\\(([^)]+)\\)", mark, text))
+    return "\\n\\n".join(chunks), figures
+
+text, figures = load_pages(modern_folder, pages=[5])
+print(text)
+print("figures handed over:", [f.size for f in figures])
 """)
 
 md("""
@@ -878,16 +967,13 @@ Ollama gives you a modest default context. If we do not adjust the context, it w
 
 This cell additionally defines a few convenience function to make out work easier. As before, we will not read their code in details, just know what they do:
 
-**pdf_text()** extracts the whole text, page by page, including page numbers.
-
-**pdf_figures()** extracts all figures of the document
+**load_pages()** reads a processed folder back: the text with a marker where
+each figure stood, and the figures themselves in that same order.
 
 **as_image_data()** decreases resolution of images, if needed, and encodes them as the bytes that LLMs understand.
 """)
 
 code("""
-##CLAUDE: THere are actually four figures in the modern pdf, we are extracting only figs 1,2 and 4 here. What is happenign to 3?
-##Also, I am trying to include one variable that relies on qwen looking at the figure. Does it know which one is figure 4? Are they going with their captions?
 PAPER_SCHEMA = {
     "type": "object",
     "properties": {
@@ -896,21 +982,6 @@ PAPER_SCHEMA = {
     "required": ["species"],
     "additionalProperties": False,
 }
-
-def pdf_text(doc, pages=None):
-    \"\"\"The whole text layer, page by page, with the page numbers left in.\"\"\"
-    pages = pages or range(1, doc.page_count + 1)
-    return "\\n\\n".join(f"--- page {p} ---\\n{get_page_text(doc, p)}" for p in pages)
-
-def pdf_figures(doc, pages=None, use_ocr=False):
-    \"\"\"Every figure in a document.
-
-    use_ocr=False only looks for figure objects, which is instant. Set it to
-    True for a scan, where finding a figure costs one OCR call per page.
-    \"\"\"
-    pages = pages or range(1, doc.page_count + 1)
-    finder = page_figures if use_ocr else figures_from_objects
-    return [fig for p in pages for fig in finder(doc, p)]
 
 def as_image_data(fig, max_side=1024):
     \"\"\"A figure, shrunk if it is huge, encoded the way a model wants it.\"\"\"
@@ -933,8 +1004,7 @@ WHOLE_PAPER_PROMPT = (
     '''
 )
 
-figures = pdf_figures(modern)
-text = pdf_text(modern)
+text, figures = load_pages(modern_folder)
 print(f"sending {len(text)} characters of text and {len(figures)} figures")
 
 reply = ollama.chat(
@@ -984,7 +1054,7 @@ DataFrame of it. The array's name is part of *your* schema, so it is an
 argument — `"species"` for `PAPER_SCHEMA`, something else for yours.
 
 Together they turn the cell above into one line:
-`to_table(extract(pdf_text(modern), figures=pdf_figures(modern)))`
+`to_table(extract(*load_pages(modern_folder)))`
 """)
 
 code("""
@@ -1092,21 +1162,24 @@ MY_PROMPT = (
 )
 
 # ------------------------------------------------- 4. run it on the 1929 paper
-# The OCR text from the long-running cell at the start of this session -- not
-# the PDF's own text layer, which we know is corrupt.
-if "legacy_ocr" not in globals():          # e.g. after a runtime restart
-    legacy_ocr = {int(p): t for p, t in json.load(open("legacy_ocr.json")).items()}
+# Straight out of the folder we wrote in session 2 -- text in reading order,
+# figures where they appeared.
+legacy_text, legacy_figures = load_pages(legacy_folder)
+print(f"sending {len(legacy_text)} characters and {len(legacy_figures)} figures")
 
-legacy_text = "\\n\\n".join(f"--- page {p} ---\\n{legacy_ocr[p]}"
-                          for p in sorted(legacy_ocr))
-print(f"sending {len(legacy_text)} characters of OCR text")
+reply = ollama.chat(
+    model=CHAT_MODEL,
+    messages=[{"role": "user",
+               "content": MY_PROMPT + legacy_text,
+               "images": [as_image_data(f) for f in legacy_figures]}],
+    format=MY_SCHEMA,
+    think=False,
+    options={"temperature": 0, "num_ctx": 16384},
+)
 
-result = extract(legacy_text, schema=MY_SCHEMA, prompt=MY_PROMPT)
-# to send the plate as well:
-#     result = extract(legacy_text, schema=MY_SCHEMA, prompt=MY_PROMPT,
-#                      figures=pdf_figures(legacy, pages=[6], use_ocr=True))
-
-to_table(result, key="records")
+my_records = json.loads(reply.message.content)["records"]
+print(f"{len(my_records)} records\\n")
+to_table({"records": my_records}, key="records")
 """)
 
 md("""
