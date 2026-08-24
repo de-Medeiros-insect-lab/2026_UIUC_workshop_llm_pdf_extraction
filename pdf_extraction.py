@@ -356,10 +356,9 @@ def figures_from_objects(doc, page):
         share = max((r.width * r.height) / page_area for r in placed) if placed else 0
         if not MIN_FIGURE_AREA <= share <= MAX_FIGURE_AREA:
             continue
-        pix = pymupdf.Pixmap(doc, xref)
-        if pix.colorspace is None:      # a stencil mask, not a picture
-            continue
-        found.append(Image.open(io.BytesIO(pix.tobytes("png"))))
+        # extract_image gives the bytes as stored, whatever the colour depth:
+        # line art at 1 bit per pixel comes back just as happily as a photo.
+        found.append(Image.open(io.BytesIO(doc.extract_image(xref)["image"])))
     return found
 
 

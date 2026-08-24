@@ -44,6 +44,8 @@ In this workshop, we will learn how to interact programmatically with large lang
 
 Everything here runs free on Google Colab using a GPU with 16GB of RAM, which is enough for low-end LLMs. If you have this memory on your machine, you can run locally too by downloading this as a python notebook. You can run python notebooks using [Jupyter](https://jupyter.org/), among other software.
 
+We will focus on a method using open-source models as minimizing required computing power, so you are able to run this yourself relatively cheaply. Many of the steps are unnecessary if you use highly sophisticated (and expensive) models with a good [agent harness](https://learn.microsoft.com/en-us/agent-framework/concepts/harness?pivots=programming-language-csharp) like [Claude code](https://claude.com/product/claude-code).
+
 We will go through 5 steps:
 
 1. **Setup** — talking to a language model from Python
@@ -250,7 +252,7 @@ gpu_report()
 md("""
 If you do not have a GPU, **STOP** and ask the instructors. You may have forgotten to choose the T4 runtime type.
 
-Now we will download our chat model. For convenience, we will save our chat model value in a variable so we can reuse it. We will use the model [Qwen 3.5](https://qwen.ai/blog?id=qwen3.5) with 9 billion parameters, which takes ~6.5 GB of RAM. It is a quite powerful model for a small size, with capabilities of chatting, reasoning, using tools, and taking images as input. More powerful versions of Qwen have more parameters, but need more RAM.
+Now we will download our chat model. For convenience, we will save our chat model name in a variable so we can reuse it. We will use the model [Qwen 3.5](https://qwen.ai/blog?id=qwen3.5) with 9 billion parameters, which takes ~6.5 GB of RAM. It is a quite powerful model for a small size, with capabilities of chatting, reasoning, using tools, and taking images as input. More powerful versions of Qwen have more parameters, but need more RAM.
 
 The terminal command to ask ollama to download a model is `ollama pull`. In a python
 notebook we can run a terminal command by starting the line with `!`, and paste the
@@ -273,7 +275,8 @@ A conversation is a list of messages. Each has a `role` and `content`.
 code("""
 reply = ollama.chat(
     model=CHAT_MODEL,
-    messages=[{"role": "user", "content": "What is a rostrum on a beetle?"}],
+    messages=[{"role": "user",
+               "content": "What is the best insect, and why?"}],
     think=False,
     options={"temperature": 0},
 )
@@ -286,12 +289,11 @@ md("""
 A `system` message sets who the model is being. Language models are best
 understood as role-playing machines:
 
-> Shanahan, M., McDonell, K. & Reynolds, L. Role play with large language
-> models. *Nature* **623**, 493–498 (2023).
+> Shanahan, M., McDonell, K. & Reynolds, L. [Role play with large language models](https://www.nature.com/articles/s41586-023-06647-8). *Nature* **623**, 493–498 (2023).
 
 Say clearly what role you want, and the model will follow. They know lots of roles from the training data!
 
-Let's try sending a message with a strict system constraint.
+Let's try sending a message with a strict system constraint. We will use a very slim system prompt, but the chatbots your are more used to interacting with[ have a lot more there.](https://platform.claude.com/docs/en/release-notes/system-prompts)
 
 Note that we are using `think=False`: the model will just answer directly without reasoning first.
 """)
@@ -301,9 +303,9 @@ reply = ollama.chat(
     model=CHAT_MODEL,
     messages=[
         {"role": "system",
-         "content": "You are an expert coleopterist. Answer in two sentences."},
+         "content": "You are an expert coleopterist. Answer in two short sentences."},
         {"role": "user",
-         "content": "What is a rostrum, and which beetles have one?"},
+         "content": "What is the best insect, and why?"},
     ],
     think=False,
     options={"temperature": 0},
@@ -353,11 +355,11 @@ reply = ollama.chat(
     model=CHAT_MODEL,
     messages=[
         {"role": "system",
-         "content": "You are an expert coleopterist. Answer in two sentences."},
+         "content": "You are an expert coleopterist. Answer in two short sentences."},
         {"role": "user",
-         "content": "What is a rostrum, and which beetles have one?"},
+         "content": "What is the best insect, and why?"},
     ],
-    think=True,
+    think="low",
     options={"temperature": 0},
 )
 
@@ -366,7 +368,7 @@ print("--- answer ---\\n", reply.message.content)
 """)
 
 md("""
-Reasoning is not always a win. On a task with nothing to reason about — copying
+Reasoning is not always prerable. On a task with nothing to reason about — copying
 text out of an image, say — it can ramble for pages and never answer. We use
 `think=False` for that. For more complicated tasks, it may help tremendously.
 
@@ -450,7 +452,7 @@ print(repr(get_page_text(legacy, 5)[:180]))
 """)
 
 md("""
-The legacy text is not empty. It is not obviously broken either. Look closely:
+The legacy text is not empty, but its content is hidden  Look closely:
 the family name reads `Cureulionidse`. The scanner's OCR ran years ago and got
 it wrong, and nothing in the file makes this clear.
 
@@ -465,7 +467,7 @@ display(ShowImage(data=base64.b64decode(render_page(legacy, 5))))
 md("""
 ### Figures: two completely different jobs
 
-In a born-digital PDF, figures are **objects**. You pull them out exactly using code. Here we use functions from the pymupdf library:
+In a born-digital PDF, figures are **objects**. You can pull them out using code. Here we use functions from the pymupdf library:
 """)
 
 code("""
@@ -490,6 +492,7 @@ to extract. We have to **find** it.
 code("""
 print("objects on legacy page 6:",
       len(legacy[5].get_images(full=True)), "-- the page scan itself")
+display(ShowImage(data=base64.b64decode(render_page(legacy,6))))
 """)
 
 md("""
@@ -522,11 +525,6 @@ Now let's compare this with the original OCR for the same page:
 
 code("""
 print("text layer :", get_page_text(legacy, 6).replace(chr(10), " "))
-""")
-
-code("""
-from IPython.display import Image as ShowImage, display
-display(ShowImage(data=base64.b64decode(render_page(legacy, 6))))
 """)
 
 md("""
@@ -591,13 +589,13 @@ if figures:
 md("""
 ### One function for both kinds of PDF
 
-We have now done the job twice, by hand, in two completely different ways: for
+We have now done the job in two completely different ways: for
 the born-digital paper we asked the PDF for its image objects, and for the scan
 we asked the OCR model where the figures were and cut them out ourselves.
 
 Let's wrap both up so we can point them at any page of any PDF. Again, do not
 worry about the details — the useful part is the last function, `page_figures()`,
-which tries the cheap route first and only calls the OCR model if the page turns
+which tries the easy route first and only calls the OCR model if the page turns
 out to have no figure objects in it.
 
 **`figure_boxes()`**: groups each `image` region the OCR model found with the `image_caption` that belongs to it.
@@ -645,10 +643,9 @@ def figures_from_objects(doc, page):
         share = max((r.width * r.height) / page_area for r in placed) if placed else 0
         if not MIN_FIGURE_AREA <= share <= MAX_FIGURE_AREA:
             continue
-        pix = pymupdf.Pixmap(doc, xref)
-        if pix.colorspace is None:      # a stencil mask, not a picture
-            continue
-        found.append(Image.open(io.BytesIO(pix.tobytes("png"))))
+        # extract_image gives the bytes as stored, whatever the colour depth:
+        # line art at 1 bit per pixel comes back just as happily as a photo.
+        found.append(Image.open(io.BytesIO(doc.extract_image(xref)["image"])))
     return found
 
 def page_figures(doc, page, dpi=150):
@@ -688,7 +685,7 @@ Bring in a paper you actually care about and see what comes out of it.
 
 1. Click the **folder icon 📁** in the left sidebar, open the `example_pdfs`
    folder, and drag your PDF into it. Wait for the upload to finish.
-2. In the cell below, put your file name in `MY_PDF` and the page you want in
+2. In the cell below, put your file name in `MY_PDF` variable and the page you want in
    `MY_PAGE`.
 3. Run it. You get the PDF's own text layer, a fresh OCR transcription of the
    same page, and any figures on it.
@@ -770,7 +767,7 @@ print("saved legacy_ocr.json")
 md("""
 ### How to constrain the output
 
-Let's start by asking the model to constrain the output to a specific format. Because we like JSON, JSON it is. Let's try this on page 2 of our modern pdf. After finished, let's discuss the response. Did you get the same as I did?
+Let's start by asking the model to constrain the output to a specific format.  Let's try this on page 2 of our modern pdf and ask for JSON format. After finished, let's discuss the response. Did you get the same as I did?
 """)
 
 code("""
@@ -807,8 +804,10 @@ SPECIES_SCHEMA = {
     "properties": {
         "name": {"type": "string"},
         "author": {"type": "string"},
-        "min_length": {"type": "number"},
+        "is_new": {"type": "boolean"},
         "max_length": {"type": "number"},
+        "n_photos": {"type": "integer"},
+        "n_in_photo": {"type": "integer"},
         "synonyms": {
             "type": "array",
             "items": {"type": "string"}
@@ -827,7 +826,14 @@ code("""
 reply = ollama.chat(
     model=CHAT_MODEL,
     messages=[{"role": "user",
-               "content": "List the species and their traits as JSON. min_length and max_length are the minimum and maximum lengths mentioned for each species\\n\\n"
+               "content": '''List the species and their traits as JSON.
+               max_length is the maximum length mentioned for the species
+               is_new is whether the species is described here
+               n_photos is the number of photos used to illustrate the species
+               n_in_photo is number of individual beetles in Figure 4 only (ignore for other figures)
+               synonyms are all synonyms mentioned in the text
+
+               '''
                           + get_page_text(modern, 2)}],
     format=SPECIES_SCHEMA,
     think=False,
@@ -866,17 +872,22 @@ We need to change two things:
 **A whole paper has many species, so the schema has to say so.** `SPECIES_SCHEMA`
 describes *one* species. Now we need a larger schema that includes `SPECIES_SCHEMA` explicitly saying there will be many species.
 
-**The model's context window is not automatically big enough.** A page of text
+**We need a large anough context window.** A page of text
 is a few hundred tokens; a whole paper plus its figures is tens of thousands.
-Ollama gives you a modest default context, and anything past it is *dropped
-without an error* — you get a confident answer based on the half of the paper
-the model actually saw. `num_ctx` is how you ask for room. We need to set a larger context. For very large papers, you may need a bigger model, more GPU memory, or both.
+Ollama gives you a modest default context. If we do not adjust the context, it will fail but not throw any obvious error: just truncate the output. We need to set  `num_ctx` to a larger number to accomodate the context. For very large papers, you may need a bigger model, more GPU memory, or both.
 
-This cell reads all seven pages and three figures, so it takes a couple of
-minutes.
+This cell additionally defines a few convenience function to make out work easier. As before, we will not read their code in details, just know what they do:
+
+**pdf_text()** extracts the whole text, page by page, including page numbers.
+
+**pdf_figures()** extracts all figures of the document
+
+**as_image_data()** decreases resolution of images, if needed, and encodes them as the bytes that LLMs understand.
 """)
 
 code("""
+##CLAUDE: THere are actually four figures in the modern pdf, we are extracting only figs 1,2 and 4 here. What is happenign to 3?
+##Also, I am trying to include one variable that relies on qwen looking at the figure. Does it know which one is figure 4? Are they going with their captions?
 PAPER_SCHEMA = {
     "type": "object",
     "properties": {
@@ -910,12 +921,16 @@ def as_image_data(fig, max_side=1024):
     return base64.b64encode(buf.getvalue()).decode()
 
 WHOLE_PAPER_PROMPT = (
-    "List every species this paper describes, using both the text and the "
-    "figures. name is the species name. author is the taxonomic authority for "
-    "that name -- the person who described it -- not an author of this paper; "
-    "for a species described as new here, use the paper's own authors. "
-    "min_length and max_length are the smallest and largest body length in mm "
-    "given for the species. Do not invent values that are not stated.\\n\\n"
+    '''List every species this paper describes, using both the text and the figures.
+    name is the species name.
+    author is the taxonomic authority for that name -- the person who described it -- not the author of this paper; for a species described as new here, use the paper's own authors.
+    max_length is the largest body length in mm given for the species.
+    is_new is whether the species is described here
+    n_photos is the number of photos used to illustrate the species
+    synonyms are all synonyms mentioned in the text
+    Do not invent values that are not stated.
+
+    '''
 )
 
 figures = pdf_figures(modern)
@@ -948,12 +963,16 @@ Read that table against the paper. Because we used a schema, the shape is guaran
 """)
 
 md("""
-### Two functions to carry forward
+### Two additional functions
 
-Every extraction we have run has the same shape: text (and maybe figures) in, a
-schema and a prompt to say what we want back, JSON out, a table to look at.
-Let's name it once, because from here on — the exercise below, and all of
-Session 5 — we call these two instead of writing the call out again.
+Every extraction we have run has the same shape:
+- text (and maybe figures) in
+- a schema to constrain the shape of the output
+- a prompt to say what we want back
+- JSON output
+- converstion to a table
+
+We will now define two functions that do all of that.
 
 **`extract()`**: takes the text, the schema and the prompt, and hands back the
 parsed JSON. `figures=` adds images to the message. `client=` sends the request
@@ -969,14 +988,26 @@ Together they turn the cell above into one line:
 """)
 
 code("""
+JSON_ONLY = (
+    "\\n\\nReply with JSON only -- no prose, no markdown, no code fence -- "
+    "matching exactly this schema:\\n{schema}\\n\\n"
+)
+
 def extract(text, schema=PAPER_SCHEMA, prompt=WHOLE_PAPER_PROMPT, figures=None,
-            model=CHAT_MODEL, client=None, num_ctx=16384):
+            model=CHAT_MODEL, client=None, num_ctx=16384, schema_in_prompt=False):
     \"\"\"Text (and figures) in, structured data out.
 
     client is None for the server on this machine. Session 5 passes a client
     pointed at Ollama's servers instead, which is the only change needed to
     run any of this on a far bigger model.
+
+    schema_in_prompt writes the schema into the prompt as well as passing it as
+    format=. Locally that is redundant -- format= is enforced. Ollama's cloud
+    does not enforce it, so there asking is all you have.
     \"\"\"
+    if schema_in_prompt:
+        prompt = prompt + JSON_ONLY.format(schema=json.dumps(schema, indent=1))
+
     message = {"role": "user", "content": prompt + text}
     if figures:
         message["images"] = [as_image_data(fig) for fig in figures]
@@ -989,7 +1020,20 @@ def extract(text, schema=PAPER_SCHEMA, prompt=WHOLE_PAPER_PROMPT, figures=None,
         think=False,
         options={"temperature": 0, "num_ctx": num_ctx},
     )
-    return json.loads(reply.message.content)
+    return parse_json(reply.message.content)
+
+def parse_json(text):
+    \"\"\"The JSON in a reply, even if the model wrapped it in something.\"\"\"
+    text = (text or "").strip()
+    if not text:
+        raise ValueError("the model returned nothing to parse")
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        start, end = text.find("{"), text.rfind("}")
+        if start == -1 or end <= start:
+            raise ValueError(f"no JSON in the reply: {text[:120]!r}") from None
+        return json.loads(text[start:end + 1])
 
 def to_table(data, key="species"):
     \"\"\"The array of records inside an extraction result, as a table.
@@ -1005,6 +1049,8 @@ md("""
 # Try it yourself
 
 Now let's practice. Use the placeholders below to set the schema for each species, the global schema, and the prompt with the details of what you want. Try to extract some information of your choice from the historical pdf.
+
+**Tip:** writing well-formatted schemas can be hard. Use Claude, chatGPT, copilot or whatever you like to double-chekc your schema!
 """)
 
 code("""
@@ -1172,7 +1218,7 @@ It read the corrupt text, noticed something was off, decided it was close
 enough, and answered anyway — often inventing a spelling that is in neither the
 text nor the page.
 
-Now change one argument.
+Now let's try with reasoning
 """)
 
 code("""
@@ -1194,21 +1240,6 @@ be wrong, so it fails on the next document — silently, which is the worst way.
 
 In practice you either already know which of your PDFs are scans, or you ask a
 model that can reason.
-""")
-
-md("""
-### Hands-on 2
-
-Run the loop over several pages and watch which ones it sends to OCR.
-""")
-
-code("""
-for pno in [2, 5, 6]:
-    q = [{"role": "system", "content": SYSTEM},
-         {"role": "user", "content":
-          f"What is printed at the very top of page {pno}? Report it exactly."}]
-    answer, calls = run_tool_loop(q, TOOLS, impls, think=True)
-    print(f"p{pno}: {[c[0] for c in calls]} -> {' '.join(answer.split())[:90]}")
 """)
 
 md("""
@@ -1282,8 +1313,9 @@ CLOUD_MODEL = "gpt-oss:120b"
 
 try:
     cloud = cloud_client()
+    # schema_in_prompt because the cloud does not enforce format= -- see above.
     data = extract(get_page_text(modern, 2)[:4000],
-                   model=CLOUD_MODEL, client=cloud)
+                   model=CLOUD_MODEL, client=cloud, schema_in_prompt=True)
     display(to_table(data).head())
 except Exception as exc:
     print("Cloud step skipped:", exc)
