@@ -12,10 +12,14 @@ Start with the demo, then take it apart.
 | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/de-Medeiros-insect-lab/2026_UIUC_workshop_llm_pdf_extraction/blob/main/demo.ipynb) | **`demo.ipynb`** — one function, three arguments, a table out. Ten minutes, mostly model download. Run this first. |
 | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/de-Medeiros-insect-lab/2026_UIUC_workshop_llm_pdf_extraction/blob/main/workshop.ipynb) | **`workshop.ipynb`** — the day itself. Five sessions building all of it from an empty cell. |
 
-The demo imports `extract_folder()` from `pdf_extraction.py`, which is the
-finished pipeline in about two hundred lines. `workshop.ipynb` deliberately
-does not import it: every piece is written out in the notebook, so you can see
-and change it.
+The demo imports `extract_folder(folder, prompt, schema)` from
+`pdf_extraction.py`, which is the finished pipeline — point it at your own
+folders long after the workshop. For each PDF it asks a reasoning model whether
+that document's own text can be trusted or whether the pages have to be re-read
+from their images, says what it decided and why, and gives you back one table.
+
+`workshop.ipynb` deliberately does *not* import that module: every piece is
+written out in the notebook, so you can see and change it.
 
 ## Models
 
