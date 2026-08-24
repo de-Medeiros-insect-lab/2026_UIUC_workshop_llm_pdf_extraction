@@ -224,6 +224,30 @@ print("Ollama is up")
 """)
 
 md("""
+### If your runtime disconnects
+
+It happens. Colab times out, or the GPU is taken back. There are two cases and
+they are not equally bad.
+
+**The kernel restarted, the machine is still yours.** Everything you downloaded
+and everything you wrote to disk is still there. Click the cell you were
+working in and choose **Runtime → Run before**. It re-runs the notebook from
+the top, but the slow parts are already done: `ollama pull` sees the models on
+disk and returns at once, and the OCR skips every page already written into
+`processed/`. Expect a few minutes, mostly model calls, not the twenty you
+spent the first time.
+
+**Colab gave you a different machine.** Then the disk went too — no models, no
+`processed/`, no repository. There is nothing to resume; run the setup cell at
+the top and start again. If you are working on something you cannot afford to
+lose, mount your Google Drive and write `processed/` there instead.
+
+Either way, **Run before is always safe**. Every cell in this notebook,
+including the hands-on ones, runs top to bottom without needing you to fill
+anything in first.
+""")
+
+md("""
 ### Check you actually have a GPU
 
 Models can run on a CPU, but then they get very slow. So let's check whether you have a GPU.
@@ -510,13 +534,13 @@ Let's do that for one page of the historical PDF:
 """)
 
 code("""
-reply = ollama.generate(
+legacy_p6 = ollama.generate(
         model=OCR_MODEL,
         prompt="<image>\\n<|grounding|>Convert the document to markdown.",
         images=[render_page(legacy, 6, dpi=100)],
         options={"temperature": 0, "num_predict": 4096},
     )
-print(reply.response)
+print(legacy_p6.response)
 """)
 
 md("""
@@ -572,12 +596,12 @@ def crop_region(doc, page, box, dpi=150, pad=0.01):
     return im.crop((int((x1/1000 - pad) * W), int((y1/1000 - pad) * H),
                     int((x2/1000 + pad) * W), int((y2/1000 + pad) * H)))
 
-for r in regions(reply.response):
+for r in regions(legacy_p6.response):
     print(r)
 """)
 
 code("""
-figures = [r for r in regions(reply.response) if r[0] in ("image", "image_caption")]
+figures = [r for r in regions(legacy_p6.response) if r[0] in ("image", "image_caption")]
 if figures:
     x1 = min(f[1] for f in figures); y1 = min(f[2] for f in figures)
     x2 = max(f[3] for f in figures); y2 = max(f[4] for f in figures)
@@ -666,8 +690,8 @@ def show_elements(pieces):
 print("MODERN, page 5 (figure objects, instant):")
 show_elements(page_elements(modern, 5))
 
-print("\\nLEGACY, page 6 (one OCR call, then we cut the figure out):")
-show_elements(page_elements(legacy, 6, transcript=ocr_page(legacy, 6)))
+print("\\nLEGACY, page 6 (the OCR we already ran, then we cut the figure out):")
+show_elements(page_elements(legacy, 6, transcript=legacy_p6.response))
 """)
 
 md("""
@@ -932,11 +956,32 @@ print(reply.message.content)
 """)
 
 md("""
-We can now use the python library `json` to load this json-formatted object as a python object including strings, numbers, lists and dictionaries:
+We can now use the python library `json` to load this json-formatted object as a python object including strings, numbers, lists and dictionaries.
+
+One wrinkle, and it is worth a minute. `json.loads` wants JSON and nothing else.
+A model that wraps its answer in a code fence, or explains itself first, or —
+as we saw in session 1 — spends its whole reply reasoning and never gets to the
+answer, will hand you something `json.loads` refuses at the first character.
+So we will use a small wrapper that digs the JSON out and says something useful
+when there is none.
 """)
 
 code("""
-json_result = json.loads(reply.message.content)
+def parse_json(text):
+    \"\"\"The JSON in a reply, even if the model wrapped it in something else.\"\"\"
+    text = (text or "").strip()
+    if not text:
+        raise ValueError("the model returned nothing to parse -- it may have "
+                         "spent the whole reply reasoning")
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        start, end = text.find("{"), text.rfind("}")
+        if start == -1 or end <= start:
+            raise ValueError(f"no JSON in the reply: {text[:120]!r}") from None
+        return json.loads(text[start:end + 1])
+
+json_result = parse_json(reply.message.content)
 json_result
 """)
 
@@ -1017,7 +1062,7 @@ reply = ollama.chat(
     options={"temperature": 0, "num_ctx": 16384},
 )
 
-species = json.loads(reply.message.content)["species"]
+species = parse_json(reply.message.content)["species"]
 print(f"{len(species)} species\\n")
 pd.DataFrame(species)
 """)
@@ -1092,19 +1137,6 @@ def extract(text, schema=PAPER_SCHEMA, prompt=WHOLE_PAPER_PROMPT, figures=None,
     )
     return parse_json(reply.message.content)
 
-def parse_json(text):
-    \"\"\"The JSON in a reply, even if the model wrapped it in something.\"\"\"
-    text = (text or "").strip()
-    if not text:
-        raise ValueError("the model returned nothing to parse")
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        start, end = text.find("{"), text.rfind("}")
-        if start == -1 or end <= start:
-            raise ValueError(f"no JSON in the reply: {text[:120]!r}") from None
-        return json.loads(text[start:end + 1])
-
 def to_table(data, key="species"):
     \"\"\"The array of records inside an extraction result, as a table.
 
@@ -1177,7 +1209,7 @@ reply = ollama.chat(
     options={"temperature": 0, "num_ctx": 16384},
 )
 
-my_records = json.loads(reply.message.content)["records"]
+my_records = parse_json(reply.message.content)["records"]
 print(f"{len(my_records)} records\\n")
 to_table({"records": my_records}, key="records")
 """)
@@ -1509,7 +1541,7 @@ def my_extract(text, model=CHAT_MODEL):
         think=False,
         options={"temperature": 0},
     )
-    return json.loads(reply.message.content)
+    return parse_json(reply.message.content)
 
 for path in sorted(glob.glob("my_pdfs/*.pdf")):
     doc = open_pdf(path)
