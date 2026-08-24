@@ -1109,12 +1109,15 @@ JSON_ONLY = (
 )
 
 def extract(text, schema=PAPER_SCHEMA, prompt=WHOLE_PAPER_PROMPT, figures=None,
-            model=CHAT_MODEL, client=None, num_ctx=16384, schema_in_prompt=False):
+            system=None, model=CHAT_MODEL, client=None, num_ctx=16384,
+            schema_in_prompt=False):
     \"\"\"Text (and figures) in, structured data out.
 
     client is None for the server on this machine. Session 5 passes a client
     pointed at Ollama's servers instead, which is the only change needed to
     run any of this on a far bigger model.
+
+    system sets the role the model should answer in, the way session 1 did.
 
     schema_in_prompt writes the schema into the prompt as well as passing it as
     format=. Locally that is redundant -- format= is enforced. Ollama's cloud
@@ -1127,10 +1130,13 @@ def extract(text, schema=PAPER_SCHEMA, prompt=WHOLE_PAPER_PROMPT, figures=None,
     if figures:
         message["images"] = [as_image_data(fig) for fig in figures]
 
+    messages = [{"role": "system", "content": system}] if system else []
+    messages.append(message)
+
     chat = (client or ollama).chat
     reply = chat(
         model=model,
-        messages=[message],
+        messages=messages,
         format=schema,
         think=False,
         options={"temperature": 0, "num_ctx": num_ctx},
@@ -1356,217 +1362,34 @@ is the judgement that carries over to your own pipelines.
 Next: doing this at scale.
 """)
 
-# ══════════════════════════════════════════════════════════════ SESSION 5
+# ══════════════════════════════════════════════════ WHERE TO GO FROM HERE
 md("""
 ---
-# Session 5 — Scaling up
+# Where to go from here
 
-**What we're doing:** swapping in a much larger model, then running the whole
-pipeline over every PDF in a folder.
+That is the whole method: read a document the way it was laid out, decide how
+much you can trust what comes out, ask for the fields you want, and check the
+answer against the source.
 
-**Why:** the shape of the code is the same for two documents or four thousand.
-What changes is that you save results as you go, so a failure halfway through
-does not cost you the whole run.
-""")
+**A bigger model, if you need one.** Everything here fits on a 16 GB GPU
+because it had to. The same code runs against something much larger without
+changing shape — a bigger model on a machine with more memory, or a hosted one,
+which in Ollama means pointing a `Client` at a different host and passing it as
+`client=`. We are not doing that today, and one warning if you do: Ollama's
+cloud does not enforce `format=`, so the schema you pass is a request rather
+than a guarantee and you must check what comes back.
 
-md("""
-### Get your own API key
-
-The models we have used so far fit on this machine. Bigger ones do not, but
-Ollama runs them on their servers and the code barely changes.
-
-You need a key of your own. It is free and takes two minutes:
-
-1. Go to **[ollama.com](https://ollama.com)** and create an account. No card
-   required.
-2. Go to **[ollama.com/settings/keys](https://ollama.com/settings/keys)** →
-   **Create key**. Copy it. You will not be shown it again.
-3. Back in Colab, click the **🔑 key icon** in the left sidebar.
-4. **+ Add new secret**. Name it exactly `OLLAMA_API_KEY`, paste your key into
-   the value box, and turn on **Notebook access**.
-
-**Never paste a key into a cell.** Anything typed into a notebook gets shared
-when the notebook does — with your collaborators, in your repository, in the
-copy you email to a student. Colab Secrets keeps it out of the file.
-""")
-
-code("""
-from ollama import Client
-
-def cloud_client():
-    \"\"\"A client pointed at Ollama's servers instead of this machine.
-
-    Same interface as the local one, so everything we have written already
-    works against it -- we only have to say where to send the request and
-    who is asking.
-    \"\"\"
-    try:
-        from google.colab import userdata
-        key = userdata.get("OLLAMA_API_KEY")
-    except Exception:
-        key = os.environ.get("OLLAMA_API_KEY")
-    if not key:
-        raise RuntimeError(
-            "No key found. Add OLLAMA_API_KEY to Colab Secrets (key icon, "
-            "left sidebar) and switch on Notebook access for this notebook.")
-    return Client(host="https://ollama.com",
-                  headers={"Authorization": "Bearer " + key})
-
-# Browse what is available at https://ollama.com/search?c=cloud
-# Note: no "-cloud" suffix when talking to the servers directly.
-CLOUD_MODEL = "gpt-oss:120b"
-
-try:
-    cloud = cloud_client()
-    # schema_in_prompt because the cloud does not enforce format= -- see above.
-    data = extract(get_page_text(modern, 2)[:4000],
-                   model=CLOUD_MODEL, client=cloud, schema_in_prompt=True)
-    display(to_table(data).head())
-except Exception as exc:
-    print("Cloud step skipped:", exc)
-""")
-
-md("""
-That is the whole difference: same prompt, same schema, same `extract`
-function — a different client and a model roughly a hundred times larger.
-
-The free tier is metered, so keep cloud calls small. Everything else today
-runs on the machine in front of you.
-""")
-
-md("""
-### Every PDF in a folder
-
-One JSON file per document, written as we go.
-""")
-
-code("""
-def process_pdf(path, model=CHAT_MODEL, max_chars=12000):
-    \"\"\"Read a PDF, extract structured data, return it.\"\"\"
-    doc = open_pdf(path)
-    text = "\\n".join(get_page_text(doc, p)
-                     for p in range(1, doc.page_count + 1))
-    return extract(text[:max_chars], model=model)
-
-os.makedirs("results", exist_ok=True)
-
-for path in sorted(glob.glob("example_pdfs/*.pdf")):
-    name = os.path.splitext(os.path.basename(path))[0]
-    out_path = f"results/{name}.json"
-    if os.path.exists(out_path):
-        print("skip (already done):", name)
-        continue
-    try:
-        data = process_pdf(path)
-        with open(out_path, "w") as fh:
-            json.dump(data, fh, indent=1)
-        n = sum(len(s.get("traits", [])) for s in data.get("species", []))
-        print(f"{name}: {len(data.get('species', []))} species, {n} traits")
-    except Exception as exc:
-        print(f"{name}: FAILED -- {exc}")
-""")
-
-md("""
-Skipping files that already have output means you can re-run the cell after a
-crash and it picks up where it stopped. At any real scale this matters more
-than anything else in the loop.
-
-### One table
-""")
-
-code("""
-frames = []
-for path in sorted(glob.glob("results/*.json")):
-    with open(path) as fh:
-        data = json.load(fh)
-    t = to_table(data)
-    t.insert(0, "source", os.path.basename(path).replace(".json", ""))
-    frames.append(t)
-
-combined = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
-print(combined.shape)
-combined.to_csv("results/combined.csv", index=False)
-combined.head(15)
-""")
-
-md("""
-### Hands-on 3 — your own data
-
-Upload a few of your own PDFs, write a schema for what *you* want out of them,
-and run the same loop.
-
-1. Click the folder icon 📁 in the left sidebar and upload PDFs into
-   `my_pdfs/` (create it in the cell below).
-2. Edit `MY_SCHEMA` for the fields you want.
-3. Edit `MY_PROMPT` to say what to extract.
-4. Run.
-
-Start with two or three pages of one document while you are getting the prompt
-right — not your whole library.
-""")
-
-code("""
-os.makedirs("my_pdfs", exist_ok=True)
-print("Upload PDFs into my_pdfs/ using the folder icon in the sidebar.")
-
-MY_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "records": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "FIELD_ONE":   {"type": "string"},
-                    "FIELD_TWO":   {"type": "string"},
-                    "source_text": {"type": "string"},
-                },
-                "required": ["FIELD_ONE", "source_text"],
-            },
-        }
-    },
-    "required": ["records"],
-}
-
-MY_PROMPT = (
-    "DESCRIBE WHAT TO EXTRACT HERE. Be specific. Copy the exact sentence "
-    "each value came from into source_text.\\n\\n"
-)
-
-def my_extract(text, model=CHAT_MODEL):
-    reply = ollama.chat(
-        model=model,
-        messages=[{"role": "user", "content": MY_PROMPT + text}],
-        format=MY_SCHEMA,
-        think=False,
-        options={"temperature": 0},
-    )
-    return parse_json(reply.message.content)
-
-for path in sorted(glob.glob("my_pdfs/*.pdf")):
-    doc = open_pdf(path)
-    text = "\\n".join(get_page_text(doc, p)
-                      for p in range(1, min(doc.page_count, 3) + 1))
-    try:
-        result = my_extract(text[:8000])
-        print(os.path.basename(path))
-        display(pd.DataFrame(result.get("records", [])))
-    except Exception as exc:
-        print(f"{os.path.basename(path)}: {exc}")
-""")
-
-md("""
-**Recap.** The pipeline is a loop: read a document, extract with a schema, save
-the result, move on. Saving per document and skipping finished work is what
-makes it survivable at scale. Swapping to a larger model is a one-line change.
-
-**Where to go from here**
+**Things worth doing before you trust a big run**
 
 - Test on a handful of documents you have already scored by hand, and measure
-  how often the model agrees with you, before trusting a large run.
-- Keep `source_text`. An extraction you cannot trace is not evidence.
+  how often the model agrees with you.
+- Keep the source text. An extraction you cannot trace is not evidence.
 - Pin your model *and* your Ollama version if you publish a method — open
   weights can be archived alongside your data, and a hosted model cannot.
+- Never paste an API key into a notebook. It travels with the file, to your
+  collaborators and into your repository.
+
+**Now open `hands-on.ipynb`** and run this on documents of your own.
 """)
 
 

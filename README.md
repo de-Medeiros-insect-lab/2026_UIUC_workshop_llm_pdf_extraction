@@ -10,7 +10,8 @@ Start with the demo, then take it apart.
 | | |
 | --- | --- |
 | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/de-Medeiros-insect-lab/2026_UIUC_workshop_llm_pdf_extraction/blob/main/demo.ipynb) | **`demo.ipynb`** — one function, three arguments, a table out. Ten minutes, mostly model download. Run this first. |
-| [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/de-Medeiros-insect-lab/2026_UIUC_workshop_llm_pdf_extraction/blob/main/workshop.ipynb) | **`workshop.ipynb`** — the day itself. Five sessions building all of it from an empty cell. |
+| [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/de-Medeiros-insect-lab/2026_UIUC_workshop_llm_pdf_extraction/blob/main/workshop.ipynb) | **`workshop.ipynb`** — the day itself. Four sessions building all of it from an empty cell, ending with an agent that decides how to read a page. |
+| [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/de-Medeiros-insect-lab/2026_UIUC_workshop_llm_pdf_extraction/blob/main/hands-on.ipynb) | **`hands-on.ipynb`** — the same pipeline on documents of your own. Every function from the workshop in one block, then your folder, your prompts, your schema. |
 
 The demo imports `extract_folder(folder, prompt, schema)` from
 `pdf_extraction.py`, which is the finished pipeline — point it at your own
@@ -19,7 +20,9 @@ that document's own text can be trusted or whether the pages have to be re-read
 from their images, says what it decided and why, and gives you back one table.
 
 `workshop.ipynb` deliberately does *not* import that module: every piece is
-written out in the notebook, so you can see and change it.
+written out in the notebook, so you can see and change it. `hands-on.ipynb` is
+generated from the workshop by `build_handson.py`, so its opening block is the
+workshop's own functions rather than a second copy of them.
 
 ## Models
 
