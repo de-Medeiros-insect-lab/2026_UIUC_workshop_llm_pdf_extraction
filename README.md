@@ -1,11 +1,21 @@
 # Extracting structured data from PDFs with open models
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/de-Medeiros-insect-lab/2026_UIUC_workshop_llm_pdf_extraction/blob/main/workshop.ipynb)
-
 Workshop materials, UIUC 2026. Everything runs free on Google Colab with
 open-weight models — no API keys, no credit card.
 
-**Click the badge above.** The first cell installs Ollama and clones this repo.
+## The two notebooks
+
+Start with the demo, then take it apart.
+
+| | |
+| --- | --- |
+| [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/de-Medeiros-insect-lab/2026_UIUC_workshop_llm_pdf_extraction/blob/main/demo.ipynb) | **`demo.ipynb`** — one function, three arguments, a table out. Ten minutes, mostly model download. Run this first. |
+| [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/de-Medeiros-insect-lab/2026_UIUC_workshop_llm_pdf_extraction/blob/main/workshop.ipynb) | **`workshop.ipynb`** — the day itself. Five sessions building all of it from an empty cell. |
+
+The demo imports `extract_folder()` from `pdf_extraction.py`, which is the
+finished pipeline in about two hundred lines. `workshop.ipynb` deliberately
+does not import it: every piece is written out in the notebook, so you can see
+and change it.
 
 ## Models
 
@@ -42,10 +52,6 @@ Requires Ollama ≥0.32 — earlier versions cannot load these models.
 5. Open the notebook:
    ```bash
    jupyter notebook workshop.ipynb
-   ```
-6. To verify your installation is sound:
-   ```bash
-   pytest tests/ -m "not ollama"
    ```
 
 ## The 2025 version
