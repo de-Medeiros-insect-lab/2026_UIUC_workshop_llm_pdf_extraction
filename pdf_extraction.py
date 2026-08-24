@@ -170,38 +170,54 @@ RESUME_PROMPT = (
 )
 
 
-def _answer(messages, schema, model, client, num_ctx, think=False,
-            attempts=2, log=None):
+def _answer(messages, schema, model, client, num_ctx, think=False, log=None):
     """Ask until there is an answer, not just reasoning.
 
     Ollama cannot reserve output space for the answer -- there is no thinking
     budget (ollama/ollama#10925) -- so a model given think=True can reason all
     the way to the end of its context and come back with nothing at all.
 
-    Rather than throw that reasoning away and start again, we hand it back as
-    finished text, with room to spare and no further thinking allowed, and ask
-    only for the conclusion.
+    Three tries, each a different guess at why the last one gave nothing:
 
-    Two attempts, deliberately: a model that will not answer even when handed
-    its own reasoning and told not to think is not going to be talked round by
-    a third try, and doubling num_ctx again would ask a 16 GB GPU for a context
-    it cannot allocate.
+      1. **thinking**, as the caller asked for it.
+      2. **inserted thinking** -- its own reasoning handed back as finished
+         text, with the context doubled and thinking off. This assumes the
+         reasoning was sound and there was simply no room left to answer, so
+         it keeps the expensive part instead of redoing it.
+      3. **no thinking** -- the original question, answered straight. This
+         assumes the reasoning itself was the problem, so it drops it, and it
+         goes back to the context size we started with rather than asking a
+         16 GB GPU for one it cannot allocate.
+
+    A caller that did not ask for thinking gets one try: there is no reasoning
+    to re-use, and stage 3 would just repeat stage 1.
     """
-    for attempt in range(1, attempts + 1):
+    stalled = None
+    try:
+        return _chat(messages, schema, model, client, num_ctx, think=think)
+    except NoAnswer as exc:
+        if not think:
+            raise
+        stalled = exc
+        if log:
+            log(f"    {exc}")
+
+    if stalled.thinking:
+        if log:
+            log(f"    handing its reasoning back and asking for the answer "
+                f"alone, with num_ctx={num_ctx * 2}")
+        resumed = list(messages) + [
+            {"role": "user",
+             "content": RESUME_PROMPT.format(thinking=stalled.thinking)}]
         try:
-            return _chat(messages, schema, model, client, num_ctx, think=think)
+            return _chat(resumed, schema, model, client, num_ctx * 2, think=False)
         except NoAnswer as exc:
-            if attempt == attempts or not exc.thinking:
-                raise
             if log:
                 log(f"    {exc}")
-                log(f"    handing its own reasoning back and asking for the "
-                    f"answer alone, with num_ctx={num_ctx * 2}")
-            messages = list(messages) + [
-                {"role": "user",
-                 "content": RESUME_PROMPT.format(thinking=exc.thinking)}]
-            num_ctx *= 2          # the reasoning we just added has to fit too
-            think = False         # it has done the thinking; we want the answer
+
+    if log:
+        log("    asking once more with no reasoning at all")
+    return _chat(messages, schema, model, client, num_ctx, think=False)
 
 
 def ocr_page(doc, page, dpi=DEFAULT_DPI):
