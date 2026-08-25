@@ -136,7 +136,7 @@ print("Ollama is up")
 md('''
 ## Everything the workshop built
 
-Here we have all thhe imports, the constants and every function from
+Here we have all the imports, the constants and every function from
 `workshop.ipynb`.
 ''', "ho-defs-md")
 
@@ -208,7 +208,6 @@ differently from one told nothing.
 ''', "ho-system-md")
 
 code("""
-# @title Default title text
 MY_SYSTEM = (
     '''You are a careful DESCRIBE THE SPECIALITY HERE.
     You read primary literature and record only what the text actually says.
@@ -245,7 +244,7 @@ in `required` only the fields that must always be there.
 
 Use `"additionalProperties": True` only if you want to allow the model to find properties that you did not list explicitly.
 
-**Tip:** writing schemas by hand is fiddly. You can start the broad strokes by hand and tehn get Claude or ChatGPT
+**Tip:** writing schemas by hand is fiddly. You can start the broad strokes by hand and then get Claude or ChatGPT
 to check whether JSON schema is valid and fix it.
 ''', "ho-schema-md")
 
@@ -277,12 +276,19 @@ md('''
 
 Each processed document will go to the model with your system prompt, your user
 prompt and your schema, and the rows come back into one table with a `source`
-column saying which paper each came from. The workhorse is the function `extract()` defined above, which includes the LLM call.
+column saying which paper each came from. Anything your schema asks for at
+document level rather than per record arrives as its own column, repeated down
+that document's rows. The workhorse is the function `extract()` defined above, which includes the LLM call.
 
 Then we will **read the table against the papers**. Because we have a schema, the shape of the output will be guaranteed. But the content may be wrong. How would you measure how much to trust?
 ''', "ho-run-md")
 
 code(r'''
+MY_NUM_CTX = 16384    # how much the model may read at once. Nothing here is
+                      # truncated, so a long document needs a bigger number --
+                      # and a bigger number needs more GPU memory. If the cell
+                      # warns you that tokens are being dropped, raise it here.
+
 if not my_papers:
     print(f"Upload PDFs into {MY_FOLDER}/ and run step 1 first.")
 else:
@@ -293,7 +299,8 @@ else:
         print(f"{name}: {len(text)} characters, {len(figures)} figures")
         try:
             data = extract(text, schema=MY_SCHEMA, prompt=MY_PROMPT,
-                           figures=figures, system=MY_SYSTEM)
+                           figures=figures, system=MY_SYSTEM,
+                           num_ctx=MY_NUM_CTX)
         except Exception as exc:
             print(f"   FAILED -- {exc}")
             continue

@@ -1126,6 +1126,15 @@ def extract(text, schema=PAPER_SCHEMA, prompt=WHOLE_PAPER_PROMPT, figures=None,
     if schema_in_prompt:
         prompt = prompt + JSON_ONLY.format(schema=json.dumps(schema, indent=1))
 
+    # Roughly four characters to a token, and roughly a thousand tokens an
+    # image. Ollama drops whatever will not fit without saying so, which is the
+    # one failure you cannot see in the answer, so say it here.
+    budget = (len(prompt) + len(text)) // 4 + 1000 * len(figures or [])
+    if budget > num_ctx:
+        print(f"WARNING: about {budget:,} tokens going into a context of "
+              f"{num_ctx:,}. The overflow will be dropped silently. Raise "
+              f"num_ctx, send fewer pages, or send fewer figures.")
+
     message = {"role": "user", "content": prompt + text}
     if figures:
         message["images"] = [as_image_data(fig) for fig in figures]
@@ -1148,8 +1157,18 @@ def to_table(data, key="species"):
 
     Our schemas wrap the records in one named array -- "species" in
     PAPER_SCHEMA. Pass key= if you named yours something else.
+
+    Anything the schema asks for beside that array -- a fact about the document
+    rather than about one record -- becomes a column of its own, repeated down
+    the rows, so it travels with the records it belongs to.
     \"\"\"
-    return pd.DataFrame(data.get(key, []))
+    rows = pd.DataFrame(data.get(key, []))
+    for field, value in data.items():
+        if field == key:
+            continue
+        rows[field] = (json.dumps(value) if isinstance(value, (list, dict))
+                       else value)
+    return rows
 """)
 
 # ════════════════════════════════════════════════════════ TRY IT YOURSELF
