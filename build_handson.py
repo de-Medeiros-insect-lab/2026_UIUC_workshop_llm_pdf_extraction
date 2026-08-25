@@ -185,14 +185,23 @@ RESCAN = [
 ]
 
 my_folders = {}
+rescanned = False
 for path in my_papers:
     name = os.path.basename(path)
     doc = open_pdf(path)
     empty = len(get_page_text(doc, min(2, doc.page_count)).strip()) < 100
     needs_ocr = name in RESCAN or empty
+    rescanned = rescanned or needs_ocr
     print(f"{name}: {'re-reading every page' if needs_ocr else 'using the stored text'}"
           f"{' (nothing there to use)' if empty and name not in RESCAN else ''}")
     my_folders[path] = process_pdf(path, needs_ocr=needs_ocr)
+
+if rescanned:
+    # Hand the GPU back. Ollama keeps a model loaded for a few minutes after
+    # its last call, and the two models will not sit in 16 GB together -- least
+    # of all with the large context the extraction below asks for.
+    ollama.generate(model=OCR_MODEL, prompt="", keep_alive=0)
+    print(f"\nreleased {OCR_MODEL}")
 
 if my_folders:
     print("\nwritten to:", *my_folders.values(), sep="\n  ")
@@ -284,10 +293,13 @@ Then we will **read the table against the papers**. Because we have a schema, th
 ''', "ho-run-md")
 
 code(r'''
-MY_NUM_CTX = 16384    # how much the model may read at once. Nothing here is
-                      # truncated, so a long document needs a bigger number --
-                      # and a bigger number needs more GPU memory. If the cell
-                      # warns you that tokens are being dropped, raise it here.
+MY_NUM_CTX = 100_000  # how much the model may read at once. Nothing here is
+                      # truncated, so this is sized for whole papers rather than
+                      # for a page or two. What it costs is GPU memory for the
+                      # key-value cache, not for the model -- so if a run is
+                      # suddenly very slow, Ollama has spilled onto the CPU and
+                      # this wants lowering. `!ollama ps` shows you: a healthy
+                      # load says 100% GPU.
 
 if not my_papers:
     print(f"Upload PDFs into {MY_FOLDER}/ and run step 1 first.")
