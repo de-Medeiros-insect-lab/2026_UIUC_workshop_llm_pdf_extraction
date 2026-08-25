@@ -17,8 +17,12 @@ import json
 WORKSHOP = "workshop.ipynb"
 HANDS_ON = "hands-on.ipynb"
 
-# Constants belonging to the walk-through, not to the pipeline.
-SKIP_NAMES = {"QUESTION", "SYSTEM", "MY_PDF", "MY_NEEDS_OCR"}
+# Constants belonging to the walk-through or to setup, not to the pipeline.
+# REPO and friends in particular: the hands-on sets its own in its setup cell,
+# and a stale second copy in here is a trap for anyone porting the notebook
+# somewhere else.
+SKIP_NAMES = {"QUESTION", "SYSTEM", "MY_PDF", "MY_NEEDS_OCR",
+              "REPO", "BRANCH", "SESSION", "IN_COLAB"}
 
 
 def definitions(path=WORKSHOP):
