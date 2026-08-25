@@ -285,9 +285,14 @@ md('''
 
 Three settings, and they pull on each other.
 
-**Model.** `qwen3.5:9b` is the one we pulled, and about as much as a T4 holds.
-A larger model reads better and needs more memory than this machine has;
-`!ollama list` shows what is here.
+**Model.** [`qwen3.5:9b`](https://ollama.com/library/qwen3.5) is the one we
+pulled, and about as much as a T4 holds. Try others and compare —
+[`llama3.1:8b`](https://ollama.com/library/llama3.1) and
+[`gemma3:12b`](https://ollama.com/library/gemma3) are both worth a run. Two
+things to know before you swap: `ollama pull` it first, and check what it can
+do. `llama3.1` reads text only, so if your extraction leans on the figures you
+want a multimodal model — `gemma3` or the qwen we started with. `!ollama list`
+shows what this machine already holds.
 
 **Thinking.** Does what you are extracting call for judgement, or is it copying
 values that sit plainly on the page? You saw in session 3 which fields reasoning
@@ -299,7 +304,9 @@ warns you when it will not.
 ''', "ho-settings-md")
 
 code('''
-MY_MODEL = CHAT_MODEL   # "qwen3.5:9b". `!ollama list` shows what else is here.
+MY_MODEL = CHAT_MODEL   # "qwen3.5:9b". To try another, pull it first:
+                        #   !ollama pull gemma3:12b
+                        # then set MY_MODEL = "gemma3:12b" here.
 
 MY_THINK = False        # reason before answering? Slower, and the reasoning is
                         # written into the context window along with everything
