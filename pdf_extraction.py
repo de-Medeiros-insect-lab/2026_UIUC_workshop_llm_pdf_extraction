@@ -419,14 +419,26 @@ def page_elements(doc, page, transcript=None, dpi=150):
         share = max((r.width * r.height) / page_area for r in rects)
         if not MIN_FIGURE_AREA <= share <= MAX_FIGURE_AREA:
             continue
-        figure = Image.open(io.BytesIO(doc.extract_image(xref)["image"]))
+        figure = as_png_mode(Image.open(io.BytesIO(doc.extract_image(xref)["image"])))
         placed.append((rects[0].y0, ("figure", figure)))
     return [piece for _, piece in sorted(placed, key=lambda item: item[0])]
 
 
+PNG_MODES = {"1", "L", "LA", "P", "RGB", "RGBA"}
+
+def as_png_mode(image):
+    """A version of an image that PNG can actually hold.
+
+    Print-ready figures are often CMYK, and PNG has no CMYK: Pillow refuses to
+    write it rather than approximating. Anything PNG cannot represent becomes
+    RGB here, once, so that saving it and sending it both work later.
+    """
+    return image if image.mode in PNG_MODES else image.convert("RGB")
+
+
 def as_image_data(fig, max_side=1024):
     """A figure, shrunk if it is huge, encoded the way a model wants it."""
-    small = fig.copy()
+    small = as_png_mode(fig).copy()
     small.thumbnail((max_side, max_side))
     buf = io.BytesIO()
     small.save(buf, format="PNG")
