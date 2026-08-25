@@ -289,16 +289,21 @@ column saying which paper each came from. Anything your schema asks for at
 document level rather than per record arrives as its own column, repeated down
 that document's rows. The workhorse is the function `extract()` defined above, which includes the LLM call.
 
+Two decisions first, both set at the top of the cell. **Thinking**: does what
+you are extracting call for judgement, or is it copying values that sit plainly
+on the page? You saw in session 3 which fields reasoning helped and which it did
+not. **Context**: `MY_NUM_CTX` has to hold your document, its figures, and the
+reasoning too if you turned that on — the cell warns you if it will not.
+
 Then we will **read the table against the papers**. Because we have a schema, the shape of the output will be guaranteed. But the content may be wrong. How would you measure how much to trust?
 ''', "ho-run-md")
 
 code(r'''
-MY_NUM_CTX = 65_536   # how much the model may read at once -- 64k, enough for a
-                      # whole paper, and measured to fit a T4 alongside the
-                      # model. What it costs is GPU memory for the key-value
-                      # cache, not for the model, so raising it is not free: if
-                      # a run turns very slow, Ollama has spilled onto the CPU.
-                      # `!ollama ps` tells you -- a healthy load says 100% GPU.
+MY_THINK = False      # reason before answering? Slower, and the reasoning is
+                      # written into the context window along with everything
+                      # else -- so if you turn this on, check MY_NUM_CTX too.
+
+MY_NUM_CTX = 65_536   # how much the model may read at once. Adjust up if your papers are too big, but uses more memory
 
 if not my_papers:
     print(f"Upload PDFs into {MY_FOLDER}/ and run step 1 first.")
@@ -311,7 +316,7 @@ else:
         try:
             data = extract(text, schema=MY_SCHEMA, prompt=MY_PROMPT,
                            figures=figures, system=MY_SYSTEM,
-                           num_ctx=MY_NUM_CTX)
+                           think=MY_THINK, num_ctx=MY_NUM_CTX)
         except Exception as exc:
             print(f"   FAILED -- {exc}")
             continue

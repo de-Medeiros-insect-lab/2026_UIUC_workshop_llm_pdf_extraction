@@ -33,7 +33,7 @@ def code(text):
 
 
 md("""
-<a href="https://colab.research.google.com/github/de-Medeiros-insect-lab/2026_UIUC_workshop_llm_pdf_extraction/blob/manual_changes/workshop.ipynb" target="_parent"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/></a>
+<a href="https://colab.research.google.com/github/de-Medeiros-insect-lab/2026_UIUC_workshop_llm_pdf_extraction/blob/main/workshop.ipynb" target="_parent"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/></a>
 """)
 
 # ══════════════════ EXTRACTING STRUCTURED DATA FROM PDFS WITH OPEN MODELS
@@ -174,6 +174,8 @@ sending it our first messages from Python.
 
 **Why:** everything later in the day is this same call with more structure
 around it. We will get comfortable with it now, while the parts are still small.
+
+Let's install Ollama now. A colab notebook starts as a fresh linux machine, so we always need to do that. On your computer, this is done only once.
 """)
 
 code("""
@@ -276,7 +278,7 @@ gpu_report()
 md("""
 If you do not have a GPU, **STOP** and ask the instructors. You may have forgotten to choose the T4 runtime type.
 
-Now we will download our chat model. For convenience, we will save our chat model name in a variable so we can reuse it. We will use the model [Qwen 3.5](https://qwen.ai/blog?id=qwen3.5) with 9 billion parameters, which takes ~6.5 GB of RAM. It is a quite powerful model for a small size, with capabilities of chatting, reasoning, using tools, and taking images as input. More powerful versions of Qwen have more parameters, but need more RAM.
+Now we will download our chat model. For convenience, we will save our chat model name in a variable so we can reuse it. We will use the model [Qwen 3.5](https://qwen.ai/blog?id=qwen3.5) with 9 billion parameters, which takes ~6.5 GB of RAM for the model plus whatever your data uses. It is a quite powerful model for a small size, with capabilities of chatting, reasoning, using tools, and taking images as input. More powerful versions of Qwen have more parameters, but need more RAM.
 
 The terminal command to ask ollama to download a model is `ollama pull`. In a python
 notebook we can run a terminal command by starting the line with `!`, and paste the
@@ -329,7 +331,7 @@ reply = ollama.chat(
         {"role": "system",
          "content": "You are an expert coleopterist. Answer in two short sentences."},
         {"role": "user",
-         "content": "What is the best insect, and why?"},
+         "content": "Which is the best insect, and why?"},
     ],
     think=False,
     options={"temperature": 0},
@@ -381,7 +383,7 @@ reply = ollama.chat(
         {"role": "system",
          "content": "You are an expert coleopterist. Answer in two short sentences."},
         {"role": "user",
-         "content": "What is the best insect, and why?"},
+         "content": "Which is the best insect, and why?"},
     ],
     think="low",
     options={"temperature": 0},
@@ -392,7 +394,9 @@ print("--- answer ---\\n", reply.message.content)
 """)
 
 md("""
-Reasoning is not always prerable. On a task with nothing to reason about — copying
+Reasoning is not always preferable. On a task with nothing to reason about — copying
+
+
 text out of an image, say — it can ramble for pages and never answer. We use
 `think=False` for that. For more complicated tasks, it may help tremendously.
 
@@ -464,7 +468,7 @@ print(modern.page_count, "pages |", legacy.page_count, "pages")
 """)
 
 md("""
-### Two documents, two kinds of text
+### For old documents, we often need to re-read the text
 """)
 
 code("""
@@ -476,7 +480,7 @@ print(repr(get_page_text(legacy, 5)[:180]))
 """)
 
 md("""
-The legacy text is not empty, but its content is hidden  Look closely:
+The legacy text is not empty, but its content is .  Look closely:
 the family name reads `Cureulionidse`. The scanner's OCR ran years ago and got
 it wrong, and nothing in the file makes this clear.
 
@@ -510,7 +514,7 @@ display(ShowImage(filename="figure_zootaxa.png", width=380))
 md("""
 In a scan there are no objects — the whole page is one photograph. Page 6 of
 the 1929 paper has a drawing of *Huarucus cacti* on it, but there is nothing
-to extract. We have to **find** it.
+to extract. We have to **find** it. A good job for a multimodal LLM!
 """)
 
 code("""
@@ -522,7 +526,7 @@ display(ShowImage(data=base64.b64decode(render_page(legacy,6))))
 md("""
 ### OCR with layout
 
-`deepseek-ocr` transcribes a page image, and asked the right way it also
+[deepseek-ocr](https://github.com/deepseek-ai/DeepSeek-OCR) is an LLM that transcribes a page image, and asked the right way it also
 reports *where* things are.
 
 When using the ollama library, we need `ollama.generate`, not
@@ -574,7 +578,7 @@ def ocr_page(doc, page, dpi=DEFAULT_DPI):
 md("""
 ### Cropping the figure
 
-The regions are just coordinates in the text. We have to manually parse them out and cut the
+`deepseek-ocr` returns regions with coordinates in a page. We have to use this information to cut the
 image.
 
 The functions below will open a page and cut figures that deepseek OCR identified. Again, we will not go over the details, feel free to reuse the code!
@@ -613,16 +617,7 @@ if figures:
 md("""
 ### Reading a page in order
 
-We can pull the text out of a page, and we can pull the figures out of a page.
-But we have been pulling them out *separately*, and that throws something away:
-which caption belongs to which figure.
-
-Page 5 of the modern paper carries two figures and two captions. Hand a model
-all the text and then all the pictures and it sees four things, with no way to
-know that FIGURE 3 describes the first picture and FIGURE 4 the second.
-
-So let's read a page the way you would: top to bottom, taking each piece as it
-comes.
+The functions above extract text and images separately. Let's now put everything together and in order. For that, we will define a few more functions:
 
 **ocr_elements()**: splits the OCR model's answer into its regions, in the order it read them. The text after each marker belongs to that marker.
 
@@ -716,15 +711,12 @@ folder**, so that what the model gets is something you can open and read:
 processed/deMedeiros2013Zootaxa/
     page-001.md ... page-007.md
     figures/p005-fig01.png
-    document.json
 ```
 
-Each page becomes markdown, in reading order, with its figures linked where
-they appeared. A caption sits under its own figure, exactly as in the paper.
+Each page is a markdown file, in reading order, with its figures linked where
+they appeared. Captions sit under their own figure, exactly as in the paper.
 
-This also means we only ever pay for OCR once. A page already written is left
-alone, so if the runtime dies you carry on where you stopped — and if one page
-came out badly, delete it and only that page is read again.
+With this, we decompose a pdf into its basic elements so we only pass what is needed to our models, decreasing the amount of input data (and the cost and time to run!)
 """)
 
 code("""
@@ -916,7 +908,10 @@ A better way to constrain the response is to use a SCHEMA.
 A [JSON schema](https://en.wikipedia.org/wiki/JSON#Metadata_and_schema) is a dictionary describing the shape you want. It includes which variables you want, what type they are, etc.
 
 Using ollama, we can pass schemas using
-`format=` and the model will constrain its response to the schema. Let's start with a simple schema that extracts the name, author, synonyms and minimum and maximum length of each species.
+`format=` and the model will constrain its response to the schema. Other libraries also have schema support, like [openAI](https://developers.openai.com/api/docs/guides/structured-outputs#supported-schemas) and [anthropic](https://platform.claude.com/docs/en/build-with-claude/structured-outputs). Each library will be a little different, make sure to consult the documentation.
+
+
+Let's start with a simple schema that extracts the name, author, synonyms and minimum and maximum length of each species.
 
 The schema below only makes species name and author mandatory (it is possible the other data is missing). It tells the type to expect for each field (types can be *string*, *number*, *array* (an unnamed list of things, like a Python list) and *object* (a named list of things, like a Python dictionary)).
 
@@ -932,13 +927,13 @@ SPECIES_SCHEMA = {
         "is_new": {"type": "boolean"},
         "max_length": {"type": "number"},
         "n_photos": {"type": "integer"},
-        "n_in_photo": {"type": "integer"},
-        "synonyms": {
+        "photo_alive": {"type": "boolean"},
+        "similar_species": {
             "type": "array",
             "items": {"type": "string"}
         }
     },
-    "required": ["name", "author"],
+    "required": ["name", "author","photo_alive","is_new"],
     "additionalProperties": False
 }
 """)
@@ -952,17 +947,18 @@ reply = ollama.chat(
     model=CHAT_MODEL,
     messages=[{"role": "user",
                "content": '''List the species and their traits as JSON.
-               max_length is the maximum length mentioned for the species
+               max_length is the maximum length mentioned for the
+               author is the author of the species, not the collector or author of the paper
                is_new is whether the species is described here
                n_photos is the number of photos used to illustrate the species
-               n_in_photo is number of individual beetles in Figure 4 only (ignore for other figures)
-               synonyms are all synonyms mentioned in the text
+               photo_alive is whether any photo shows the insect alive in its habitat
+               similar_species are all species that the text mentions are similar
 
                '''
                           + get_page_text(modern, 2)}],
     format=SPECIES_SCHEMA,
     think=False,
-    options={"temperature": 0},
+    options={"temperature": 0}
 )
 print(reply.message.content)
 """)
@@ -970,12 +966,9 @@ print(reply.message.content)
 md("""
 We can now use the python library `json` to load this json-formatted object as a python object including strings, numbers, lists and dictionaries.
 
-One wrinkle, and it is worth a minute. `json.loads` wants JSON and nothing else.
-A model that wraps its answer in a code fence, or explains itself first, or —
-as we saw in session 1 — spends its whole reply reasoning and never gets to the
-answer, will hand you something `json.loads` refuses at the first character.
-So we will use a small wrapper that digs the JSON out and says something useful
-when there is none.
+This would be simple in principle, just the function `json.loads()`
+
+However, while our schema guarantees the output format, we can still get an error if the thinking and output are so long that they exhaust [the model context window](https://www.ibm.com/think/topics/context-window). For these cases, we are creating a specialized function that checks whether the output is truly JSON.
 """)
 
 code("""
@@ -1055,7 +1048,8 @@ WHOLE_PAPER_PROMPT = (
     max_length is the largest body length in mm given for the species.
     is_new is whether the species is described here
     n_photos is the number of photos used to illustrate the species
-    synonyms are all synonyms mentioned in the text
+    photo_alive is whether any photo shows the insect alive in its habitat
+    similar_species are all species that the text mentions are similar
     Do not invent values that are not stated.
 
     '''
@@ -1076,17 +1070,47 @@ reply = ollama.chat(
 
 species = parse_json(reply.message.content)["species"]
 print(f"{len(species)} species\\n")
+display(species)
 pd.DataFrame(species)
 """)
 
 md("""
-Read that table against the paper. Because we used a schema, the shape is guaranteed - it will only have what we asked for. But there may be content errors.  Worth checking before you trust any of it:
+Read that table against the paper. Because we used a schema, the shape is guaranteed - it will only have what we asked for. But there may be content errors.  Let's check before we trust any of it:
 
 - Did it find every species, and only species that are really described here?
-- Are the lengths the ones in the text, or ones it assembled from nearby
-  numbers? A ratio, a scale bar and a body length all look alike to a model.
+- Is max_length correct?
 - Is `author` a taxonomic authority, or did it fall back on "sp. n."? Compare
   with what came back before we spelled the field out in the prompt.
+- Are the similar species correct?
+
+Let's try now with thinking enabled. We will need more context since this will use more tokens.
+""")
+
+code("""
+reply = ollama.chat(
+    model=CHAT_MODEL,
+    messages=[{"role": "user",
+               "content": WHOLE_PAPER_PROMPT + text,
+               "images": [as_image_data(f) for f in figures]}],
+    format=PAPER_SCHEMA,
+    think=True,
+    options={"temperature": 0, "num_ctx": 65536},
+)
+
+print("--- reasoning ---\\n", reply.message.thinking)
+print("--- result ---\\n")
+species = parse_json(reply.message.content)["species"]
+print(f"{len(species)} species\\n")
+display(species)
+pd.DataFrame(species)
+""")
+
+md("""
+
+""")
+
+md("""
+How does this response with thinking enabled compare to the one with no thinking? Which properties benefited the most? Can you decide when to use thinking from now on?
 """)
 
 md("""
@@ -1121,8 +1145,8 @@ JSON_ONLY = (
 )
 
 def extract(text, schema=PAPER_SCHEMA, prompt=WHOLE_PAPER_PROMPT, figures=None,
-            system=None, model=CHAT_MODEL, client=None, num_ctx=16384,
-            schema_in_prompt=False):
+            system=None, think=False, model=CHAT_MODEL, client=None,
+            num_ctx=16384, schema_in_prompt=False):
     \"\"\"Text (and figures) in, structured data out.
 
     client is None for the server on this machine. Session 5 passes a client
@@ -1130,6 +1154,9 @@ def extract(text, schema=PAPER_SCHEMA, prompt=WHOLE_PAPER_PROMPT, figures=None,
     run any of this on a far bigger model.
 
     system sets the role the model should answer in, the way session 1 did.
+
+    think is the choice we just made by hand: reasoning before answering,
+    which helps the fields that need judgement and costs time and context.
 
     schema_in_prompt writes the schema into the prompt as well as passing it as
     format=. Locally that is redundant -- format= is enforced. Ollama's cloud
@@ -1139,13 +1166,18 @@ def extract(text, schema=PAPER_SCHEMA, prompt=WHOLE_PAPER_PROMPT, figures=None,
         prompt = prompt + JSON_ONLY.format(schema=json.dumps(schema, indent=1))
 
     # Roughly four characters to a token, and roughly a thousand tokens an
-    # image. Ollama drops whatever will not fit without saying so, which is the
-    # one failure you cannot see in the answer, so say it here.
+    # image. Reasoning is written into the same window and cannot be capped, so
+    # when it is on we set a few thousand tokens aside for it. Ollama drops
+    # whatever will not fit without saying so, which is the one failure you
+    # cannot see in the answer, so say it here.
     budget = (len(prompt) + len(text)) // 4 + 1000 * len(figures or [])
+    if think:
+        budget += 4000
     if budget > num_ctx:
-        print(f"WARNING: about {budget:,} tokens going into a context of "
-              f"{num_ctx:,}. The overflow will be dropped silently. Raise "
-              f"num_ctx, send fewer pages, or send fewer figures.")
+        room = " (including room set aside for reasoning)" if think else ""
+        print(f"WARNING: about {budget:,} tokens for a context of {num_ctx:,}"
+              f"{room}. The overflow will be dropped silently. Raise num_ctx, "
+              f"send fewer pages, or send fewer figures.")
 
     message = {"role": "user", "content": prompt + text}
     if figures:
@@ -1159,7 +1191,7 @@ def extract(text, schema=PAPER_SCHEMA, prompt=WHOLE_PAPER_PROMPT, figures=None,
         model=model,
         messages=messages,
         format=schema,
-        think=False,
+        think=think,
         options={"temperature": 0, "num_ctx": num_ctx},
     )
     return parse_json(reply.message.content)
@@ -1415,10 +1447,7 @@ than a guarantee and you must check what comes back.
 - Test on a handful of documents you have already scored by hand, and measure
   how often the model agrees with you.
 - Keep the source text. An extraction you cannot trace is not evidence.
-- Pin your model *and* your Ollama version if you publish a method — open
-  weights can be archived alongside your data, and a hosted model cannot.
-- Never paste an API key into a notebook. It travels with the file, to your
-  collaborators and into your repository.
+- Record your model *and* your Ollama version if you publish a method.
 
 **Now open `hands-on.ipynb`** and run this on documents of your own.
 """)
