@@ -480,7 +480,7 @@ print(repr(get_page_text(legacy, 5)[:180]))
 """)
 
 md("""
-The legacy text is not empty, but its content is .  Look closely:
+The legacy text is not empty, but its content is hidden.  Look closely:
 the family name reads `Cureulionidse`. The scanner's OCR ran years ago and got
 it wrong, and nothing in the file makes this clear.
 
@@ -933,7 +933,7 @@ SPECIES_SCHEMA = {
             "items": {"type": "string"}
         }
     },
-    "required": ["name", "author","photo_alive","is_new"],
+    "required": ["name", "author"],
     "additionalProperties": False
 }
 """)
@@ -1103,10 +1103,6 @@ species = parse_json(reply.message.content)["species"]
 print(f"{len(species)} species\\n")
 display(species)
 pd.DataFrame(species)
-""")
-
-md("""
-
 """)
 
 md("""
