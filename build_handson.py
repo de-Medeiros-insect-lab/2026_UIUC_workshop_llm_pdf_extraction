@@ -286,12 +286,15 @@ md('''
 Three settings, and they pull on each other.
 
 **Model.** [`qwen3.5:9b`](https://ollama.com/library/qwen3.5) is the one we
-pulled, and about as much as a T4 holds. Try others and compare —
-[`llama3.1:8b`](https://ollama.com/library/llama3.1) and
-[`gemma3:12b`](https://ollama.com/library/gemma3) are both worth a run. Two
-things to know before you swap: `ollama pull` it first, and check what it can
-do. `llama3.1` reads text only, so if your extraction leans on the figures you
-want a multimodal model — `gemma3` or the qwen we started with. `!ollama list`
+pulled. Try others and compare — [`gemma3:12b`](https://ollama.com/library/gemma3)
+(8.1 GB) and [`gemma3:12b-it-qat`](https://ollama.com/library/gemma3/tags)
+(8.9 GB) are both worth a run, and both read images, which this pipeline needs.
+The `-it-qat` one was trained with its 4-bit quantisation in mind rather than
+squashed afterwards, so it holds up better for slightly more disk.
+
+`ollama pull` a model before you select it here, and remember both of those are
+larger than the 9B we started with: the weights take room the key-value cache
+was using, so a bigger model may mean a smaller `MY_NUM_CTX`. `!ollama list`
 shows what this machine already holds.
 
 **Thinking.** Does what you are extracting call for judgement, or is it copying
@@ -305,8 +308,8 @@ warns you when it will not.
 
 code('''
 MY_MODEL = CHAT_MODEL   # "qwen3.5:9b". To try another, pull it first:
-                        #   !ollama pull gemma3:12b
-                        # then set MY_MODEL = "gemma3:12b" here.
+                        #   !ollama pull gemma3:12b-it-qat
+                        # then set MY_MODEL = "gemma3:12b-it-qat" here.
 
 MY_THINK = False        # reason before answering? Slower, and the reasoning is
                         # written into the context window along with everything
