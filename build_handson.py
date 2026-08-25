@@ -293,13 +293,12 @@ Then we will **read the table against the papers**. Because we have a schema, th
 ''', "ho-run-md")
 
 code(r'''
-MY_NUM_CTX = 100_000  # how much the model may read at once. Nothing here is
-                      # truncated, so this is sized for whole papers rather than
-                      # for a page or two. What it costs is GPU memory for the
-                      # key-value cache, not for the model -- so if a run is
-                      # suddenly very slow, Ollama has spilled onto the CPU and
-                      # this wants lowering. `!ollama ps` shows you: a healthy
-                      # load says 100% GPU.
+MY_NUM_CTX = 65_536   # how much the model may read at once -- 64k, enough for a
+                      # whole paper, and measured to fit a T4 alongside the
+                      # model. What it costs is GPU memory for the key-value
+                      # cache, not for the model, so raising it is not free: if
+                      # a run turns very slow, Ollama has spilled onto the CPU.
+                      # `!ollama ps` tells you -- a healthy load says 100% GPU.
 
 if not my_papers:
     print(f"Upload PDFs into {MY_FOLDER}/ and run step 1 first.")
