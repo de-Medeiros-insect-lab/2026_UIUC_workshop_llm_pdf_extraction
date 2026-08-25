@@ -950,7 +950,7 @@ reply = ollama.chat(
                max_length is the maximum length mentioned for the
                author is the author of the species, not the collector or author of the paper
                is_new is whether the species is described here
-               n_photos is the number of photos used to illustrate the species
+               n_photos is the number of photos used to illustrate the species. Photos only, no illustrations
                photo_alive is whether any photo shows the insect alive in its habitat
                similar_species are all species that the text mentions are similar
 
@@ -1047,7 +1047,7 @@ WHOLE_PAPER_PROMPT = (
     author is the taxonomic authority for that name -- the person who described it -- not the author of this paper; for a species described as new here, use the paper's own authors.
     max_length is the largest body length in mm given for the species.
     is_new is whether the species is described here
-    n_photos is the number of photos used to illustrate the species
+    n_photos is the number of photos used to illustrate the species. Photos only, no illustrations.
     photo_alive is whether any photo shows the insect alive in its habitat
     similar_species are all species that the text mentions are similar
     Do not invent values that are not stated.
@@ -1217,7 +1217,18 @@ md("""
 
 Now let's practice. Use the placeholders below to set the schema for each species, the global schema, and the prompt with the details of what you want. Try to extract some information of your choice from the historical pdf.
 
-**Tip:** writing well-formatted schemas can be hard. Use Claude, chatGPT, copilot or whatever you like to double-chekc your schema!
+**Tip:** writing well-formatted schemas can be hard. Use Claude, chatGPT, copilot or whatever you like to double-check your schema!
+
+Remember the main data types:
+- `string` for text
+- `boolean` for True/False
+- `integer` for integer numbers
+- `number` for non-integer numbers
+
+- `array` for ordered unnamed lists of similar things (like a Python list)
+- `object` for named lists (like a Python dictionary)
+
+`arrays` and `objects` can contain any of the other data types. including other arrays and objects.
 """)
 
 code("""
@@ -1291,7 +1302,9 @@ Next: letting the model decide how to read a page.
 # ══════════════════════════════════════════════════════════════ SESSION 4
 md("""
 ---
-# Session 4 — An agent that chooses
+# Session 4 — Build an agent that knows what to do
+
+Previously, we decided when to use OCR or not. This optional session shows how to equip an LLM with the tools to decide autonomously when to do it.
 
 **What we're doing:** giving the model two tools — cheap text, expensive OCR —
 and letting it pick.
@@ -1303,7 +1316,9 @@ model decides.
 
 md("""
 Tools are described as JSON, much like the schema. The description is what the
-model reads to choose — write it for the model, not for yourself.
+model reads to decide when to use a tool.
+
+Write the description for the model, not for yourself.
 """)
 
 code("""
@@ -1331,7 +1346,9 @@ TOOLS = [
 """)
 
 md("""
-The model can only *ask* for a tool; we run it and hand back the result. That
+The model can only *ask* for a tool, it doesn't run it itself.
+
+So we need to create a function that will be called by the model and hand back the result. That
 back-and-forth is the loop below. It is a function because we call it several
 times with different settings.
 """)
